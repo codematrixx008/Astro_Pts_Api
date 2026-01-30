@@ -1,8 +1,11 @@
-/*
+﻿/*
   SQL Server (MSSQL) idempotent schema for Astro API Foundation.
   Foreign keys REMOVED.
 */
 
+/* =========================================================
+   USERS
+   ========================================================= */
 IF OBJECT_ID(N'dbo.Users', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.Users (
@@ -14,6 +17,9 @@ BEGIN
     );
 END;
 
+/* =========================================================
+   ORGANIZATIONS
+   ========================================================= */
 IF OBJECT_ID(N'dbo.Organizations', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.Organizations (
@@ -24,6 +30,9 @@ BEGIN
     );
 END;
 
+/* =========================================================
+   USER ↔ ORG
+   ========================================================= */
 IF OBJECT_ID(N'dbo.UserOrganizations', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.UserOrganizations (
@@ -34,6 +43,9 @@ BEGIN
     );
 END;
 
+/* =========================================================
+   REFRESH TOKENS
+   ========================================================= */
 IF OBJECT_ID(N'dbo.RefreshTokens', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RefreshTokens (
@@ -45,11 +57,21 @@ BEGIN
         RevokedUtc          DATETIME2(0) NULL,
         ReplacedByTokenHash NVARCHAR(400) NULL
     );
+END;
 
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_RefreshTokens_UserId'
+      AND object_id = OBJECT_ID('dbo.RefreshTokens')
+)
+BEGIN
     CREATE INDEX IX_RefreshTokens_UserId
     ON dbo.RefreshTokens(UserId);
 END;
 
+/* =========================================================
+   API KEYS
+   ========================================================= */
 IF OBJECT_ID(N'dbo.ApiKeys', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ApiKeys (
@@ -64,11 +86,21 @@ BEGIN
         LastUsedUtc DATETIME2(0) NULL,
         RevokedUtc  DATETIME2(0) NULL
     );
+END;
 
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_ApiKeys_OrgId'
+      AND object_id = OBJECT_ID('dbo.ApiKeys')
+)
+BEGIN
     CREATE INDEX IX_ApiKeys_OrgId
     ON dbo.ApiKeys(OrgId);
 END;
 
+/* =========================================================
+   API USAGE LOGS
+   ========================================================= */
 IF OBJECT_ID(N'dbo.ApiUsageLogs', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ApiUsageLogs (
@@ -82,25 +114,48 @@ BEGIN
         Ip            NVARCHAR(80) NULL,
         CreatedUtc    DATETIME2(0) NOT NULL
     );
+END;
 
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_ApiUsageLogs_ApiKeyId'
+      AND object_id = OBJECT_ID('dbo.ApiUsageLogs')
+)
+BEGIN
     CREATE INDEX IX_ApiUsageLogs_ApiKeyId
     ON dbo.ApiUsageLogs(ApiKeyId);
+END;
 
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_ApiUsageLogs_UserId'
+      AND object_id = OBJECT_ID('dbo.ApiUsageLogs')
+)
+BEGIN
     CREATE INDEX IX_ApiUsageLogs_UserId
     ON dbo.ApiUsageLogs(UserId);
 END;
 
-IF OBJECT_ID('dbo.ApiUsageCounters', 'U') IS NULL
+/* =========================================================
+   API USAGE COUNTERS (QUOTA)
+   ========================================================= */
+IF OBJECT_ID(N'dbo.ApiUsageCounters', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ApiUsageCounters (
-        ApiKeyId       BIGINT NOT NULL,
-        DateUtc        DATE NOT NULL,
-        RequestCount   INT NOT NULL,
+        ApiKeyId     BIGINT NOT NULL,
+        DateUtc      DATE NOT NULL,
+        RequestCount INT NOT NULL,
         CONSTRAINT PK_ApiUsageCounters
             PRIMARY KEY (ApiKeyId, DateUtc)
     );
 END;
 
-CREATE INDEX IX_ApiUsageCounters_DateUtc
-ON dbo.ApiUsageCounters (DateUtc);
-
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'IX_ApiUsageCounters_DateUtc'
+      AND object_id = OBJECT_ID('dbo.ApiUsageCounters')
+)
+BEGIN
+    CREATE INDEX IX_ApiUsageCounters_DateUtc
+    ON dbo.ApiUsageCounters(DateUtc);
+END;

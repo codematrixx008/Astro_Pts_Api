@@ -1,21 +1,21 @@
-﻿using Astro.Application.Common;
+﻿using Astro.Api.Authorization;
+using Astro.Application.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
-namespace Astro.Api.Controllers;
 
 [ApiController]
 [Route("v1/panchang")]
 public sealed class PanchangController : ControllerBase
 {
     [HttpGet]
-    [Authorize(Policy = "panchang.read")]
+    [Authorize(Policy = ScopePolicies.PanchangRead)]
     public IActionResult Get(
         [FromQuery] DateOnly date,
         [FromQuery] double lat,
         [FromQuery] double lon,
         [FromQuery] string tz = "Asia/Kolkata")
     {
+        Validation.EnsureDateRange(date);
         Validation.EnsureLatLon(lat, lon);
 
         return Ok(new

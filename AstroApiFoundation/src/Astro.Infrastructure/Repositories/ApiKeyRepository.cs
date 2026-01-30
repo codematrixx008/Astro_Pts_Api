@@ -45,8 +45,7 @@ public sealed class ApiKeyRepository : IApiKeyRepository
                     FROM ApiKeys
                     WHERE Prefix = @Prefix
                       AND IsActive = 1
-                      AND RevokedUtc IS NULL;
-";
+                      AND RevokedUtc IS NULL;";
         return await conn.QueryFirstOrDefaultAsync<ApiKey>(new CommandDefinition(sql, new { Prefix = prefix }, cancellationToken: ct));
     }
 

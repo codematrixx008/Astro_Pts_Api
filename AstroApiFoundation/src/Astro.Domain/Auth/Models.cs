@@ -31,21 +31,40 @@ public sealed record RefreshToken(
     string? ReplacedByTokenHash
 );
 
-public sealed record ApiKey(
-    long ApiKeyId,
-    long OrgId,
-    string Name,
-    string Prefix,
-    string SecretHash,
-    string ScopesCsv,
-    bool IsActive,
-    DateTime CreatedUtc,
-    DateTime? LastUsedUtc,
-    DateTime? RevokedUtc,
-    int? DailyQuota,     
-    string? PlanCode     
-);
+//public sealed record ApiKey(
+//    long ApiKeyId,
+//    long OrgId,
+//    string Name,
+//    string Prefix,
+//    string SecretHash,
+//    string ScopesCsv,
+//    bool IsActive,
+//    DateTime CreatedUtc,
+//    DateTime? LastUsedUtc,
+//    DateTime? RevokedUtc,
+//    int? DailyQuota,     
+//    string? PlanCode     
+//);
+public sealed class ApiKey
+{
+    // Required by Dapper
+    public ApiKey() { }
 
+    public long ApiKeyId { get; init; }
+    public long OrgId { get; init; }
+    public string Name { get; init; } = default!;
+    public string Prefix { get; init; } = default!;
+    public string SecretHash { get; init; } = default!;
+    public string ScopesCsv { get; init; } = default!;
+    public bool IsActive { get; init; }
+    public DateTime CreatedUtc { get; init; }
+    public DateTime? LastUsedUtc { get; init; }
+    public DateTime? RevokedUtc { get; init; }
+
+    // Optional / nullable
+    public int? DailyQuota { get; init; }
+    public string? PlanCode { get; init; }
+}
 public sealed record ApiUsageLog(
     long ApiUsageLogId,
     long? ApiKeyId,

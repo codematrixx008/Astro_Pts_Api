@@ -93,10 +93,22 @@ builder.Services
 // =====================================================
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy(ScopePolicies.PanchangRead, policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("scope", "panchang.read"));
+    });
+
     options.AddPolicy(ScopePolicies.EphemerisRead, policy =>
-        policy.Requirements.Add(
-            new ScopeRequirement("ephemeris.read")));
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("scope", "ephemeris.read"));
+    });
 });
+
+
 
 builder.Services.AddSingleton<
     Microsoft.AspNetCore.Authorization.IAuthorizationHandler,

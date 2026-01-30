@@ -21,4 +21,14 @@ public static class Validation
         if (lon < -180 || lon > 180)
             throw new ArgumentOutOfRangeException(nameof(lon), "lon must be -180..180");
     }
+
+    public static void EnsureDateRange(DateOnly date)
+    {
+        var min = new DateOnly(1900, 1, 1);
+        var max = new DateOnly(2100, 12, 31);
+
+        if (date < min || date > max)
+            throw new ArgumentOutOfRangeException(nameof(date), "date out of range.");
+    }
+
 }
