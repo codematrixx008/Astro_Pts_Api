@@ -44,8 +44,14 @@ builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
 builder.Services.AddScoped<IUserOrganizationRepository, UserOrganizationRepository>();
 builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
-builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
+builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>(); 
 builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
+builder.Services.AddScoped<IPersonalDetailRepository, PersonalDetailRepository>();
+builder.Services.AddScoped<IAvkahadaChakraRepository, AvkahadaChakraRepository>();
+builder.Services.AddScoped<IMaleficRepository, MaleficRepository>();
+builder.Services.AddScoped<IOtherImportantDataRepository,OtherImportantDataRepository>();
+builder.Services.AddScoped<ICalChalitRepository, CalChalitRepository>();
+
 
 
 // =====================================================
