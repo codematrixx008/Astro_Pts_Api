@@ -1,0 +1,39 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31912.275
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Astro.Domain", "src\Astro.Domain\Astro.Domain.csproj", "{6F9B98D8-50B6-418F-8B51-B651B74E22DA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Astro.Application", "src\Astro.Application\Astro.Application.csproj", "{5225E438-92D9-4EF0-A424-4BB75487C0D7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Astro.Infrastructure", "src\Astro.Infrastructure\Astro.Infrastructure.csproj", "{99FF37A5-319F-42FA-A047-30168AF653EA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Astro.Api", "src\Astro.Api\Astro.Api.csproj", "{85DFA217-6886-4569-B303-49691B48717B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6F9B98D8-50B6-418F-8B51-B651B74E22DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F9B98D8-50B6-418F-8B51-B651B74E22DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F9B98D8-50B6-418F-8B51-B651B74E22DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F9B98D8-50B6-418F-8B51-B651B74E22DA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5225E438-92D9-4EF0-A424-4BB75487C0D7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5225E438-92D9-4EF0-A424-4BB75487C0D7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5225E438-92D9-4EF0-A424-4BB75487C0D7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5225E438-92D9-4EF0-A424-4BB75487C0D7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{99FF37A5-319F-42FA-A047-30168AF653EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{99FF37A5-319F-42FA-A047-30168AF653EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{99FF37A5-319F-42FA-A047-30168AF653EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{99FF37A5-319F-42FA-A047-30168AF653EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{85DFA217-6886-4569-B303-49691B48717B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{85DFA217-6886-4569-B303-49691B48717B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{85DFA217-6886-4569-B303-49691B48717B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{85DFA217-6886-4569-B303-49691B48717B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,9 @@
+/AstroApiFoundation/.vs
+/AstroApiFoundation/src/Astro.Api/bin
+/AstroApiFoundation/src/Astro.Api/obj
+/AstroApiFoundation/src/Astro.Application/bin
+/AstroApiFoundation/src/Astro.Application/obj
+/AstroApiFoundation/src/Astro.Domain/bin
+/AstroApiFoundation/src/Astro.Domain/obj
+/AstroApiFoundation/src/Astro.Infrastructure/bin
+/AstroApiFoundation/src/Astro.Infrastructure/obj
