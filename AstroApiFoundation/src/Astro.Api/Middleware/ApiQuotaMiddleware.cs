@@ -1,54 +1,39 @@
 ﻿using Astro.Domain.ApiUsage;
-using Astro.Api.Security;
 
-namespace Astro.Api.Middleware
+namespace Astro.Api.Middleware;
+
+public sealed class ApiQuotaMiddleware
 {
-    public sealed class ApiQuotaMiddleware : IMiddleware
+    private readonly RequestDelegate _next;
+
+    public ApiQuotaMiddleware(RequestDelegate next) => _next = next;
+
+    public async Task InvokeAsync(HttpContext context, IApiUsageCounterRepository counters)
     {
-        private readonly IApiUsageCounterRepository _counters;
-
-        public ApiQuotaMiddleware(IApiUsageCounterRepository counters)
+        var apiCtx = context.GetApiKeyContext();
+        if (apiCtx is null || apiCtx.DailyQuota is null)
         {
-            _counters = counters;
+            await _next(context);
+            return;
         }
 
-        public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var used = await counters.IncrementDailyAsync(apiCtx.ApiKeyId, today, context.RequestAborted);
+
+        context.Response.Headers["X-Quota-Daily"] = apiCtx.DailyQuota.Value.ToString();
+        context.Response.Headers["X-Usage-Daily"] = used.ToString();
+
+        if (used > apiCtx.DailyQuota.Value)
         {
-            var apiCtx = context.GetApiKeyContext();
-            if (apiCtx is null)
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await context.Response.WriteAsJsonAsync(new
             {
-                await next(context);
-                return;
-            }
-
-            // If no quota -> just continue (still count if you want, but not required)
-            var dailyQuota = apiCtx.DailyQuota; // add this into ApiKeyContext
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
-
-            if (dailyQuota is null)
-            {
-                await next(context);
-                return;
-            }
-
-            // Increment then check (simple, consistent)
-            var used = await _counters.IncrementDailyAsync(apiCtx.ApiKeyId, today, context.RequestAborted);
-
-            context.Response.Headers["X-Quota-Daily"] = dailyQuota.Value.ToString();
-            context.Response.Headers["X-Usage-Daily"] = used.ToString();
-
-            if (used > dailyQuota.Value)
-            {
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    error = "quota_exceeded",
-                    message = "Daily quota exceeded for this API key."
-                });
-                return;
-            }
-
-            await next(context);
+                error = "quota_exceeded",
+                message = "Daily quota exceeded for this API key."
+            }, context.RequestAborted);
+            return;
         }
+
+        await _next(context);
     }
 }

@@ -48,7 +48,6 @@ builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
 builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
 builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
-builder.Services.AddScoped<ApiQuotaMiddleware>();
 
 
 
@@ -233,11 +232,9 @@ app.UseWhen(
     ctx => ctx.Request.Path.StartsWithSegments("/v1"),
     appBuilder =>
     {
-        appBuilder.UseAuthentication();
         appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
+        appBuilder.UseMiddleware<ApiQuotaMiddleware>();
         appBuilder.UseAuthorization();
-        appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
-        appBuilder.UseMiddleware<ApiQuotaMiddleware>(); // NEW (after auth)
     });
 
 app.UseAuthorization();

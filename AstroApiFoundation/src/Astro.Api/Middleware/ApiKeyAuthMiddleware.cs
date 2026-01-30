@@ -18,23 +18,20 @@ public sealed class ApiKeyAuthMiddleware
     {
         var ct = context.RequestAborted;
 
-        // Require API key
         if (!context.Request.Headers.TryGetValue("X-Api-Key", out var headerValue))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(
-                new { error = "missing_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(new { error = "missing_api_key" }, ct);
             return;
         }
 
         var raw = headerValue.ToString().Trim();
         var parts = raw.Split('.', 2);
 
-        if (parts.Length != 2)
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(
-                new { error = "invalid_api_key_format" }, ct);
+            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key_format" }, ct);
             return;
         }
 
@@ -45,16 +42,14 @@ public sealed class ApiKeyAuthMiddleware
         if (apiKey is null || !apiKey.IsActive || apiKey.RevokedUtc is not null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(
-                new { error = "invalid_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key" }, ct);
             return;
         }
 
         if (!hasher.Verify(secret, apiKey.SecretHash))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(
-                new { error = "invalid_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key" }, ct);
             return;
         }
 
@@ -62,9 +57,15 @@ public sealed class ApiKeyAuthMiddleware
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         context.SetApiKeyContext(
-            new ApiKeyContext(apiKey.ApiKeyId, apiKey.OrgId, scopes, apiKey.Prefix,apiKey.DailyQuota,apiKey.PlanCode));
+            new ApiKeyContext(
+                apiKey.ApiKeyId,
+                apiKey.OrgId,
+                scopes,
+                apiKey.Prefix,
+                apiKey.DailyQuota,
+                apiKey.PlanCode
+            ));
 
-        // Build ClaimsPrincipal for [Authorize]
         var claims = new List<Claim>
         {
             new Claim("api_key_id", apiKey.ApiKeyId.ToString()),
@@ -75,11 +76,9 @@ public sealed class ApiKeyAuthMiddleware
         foreach (var scope in scopes)
             claims.Add(new Claim("scope", scope));
 
-        var identity = new ClaimsIdentity(claims, authenticationType: "ApiKey");
-        context.User = new ClaimsPrincipal(identity);
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "ApiKey"));
 
         await apiKeys.TouchLastUsedAsync(apiKey.ApiKeyId, DateTime.UtcNow, ct);
-
         await _next(context);
     }
 }
