@@ -31,6 +31,7 @@ public sealed class JwtTokenService : IJwtTokenService
         foreach (var r in roles) claims.Add(new Claim(ClaimTypes.Role, r));
         foreach (var s in scopes) claims.Add(new Claim("scope", s));
 
+
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_opts.SigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

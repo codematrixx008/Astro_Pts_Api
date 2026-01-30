@@ -159,3 +159,70 @@ BEGIN
     CREATE INDEX IX_ApiUsageCounters_DateUtc
     ON dbo.ApiUsageCounters(DateUtc);
 END;
+
+
+-- Astrologer profile
+IF OBJECT_ID('dbo.AstrologerProfiles','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.AstrologerProfiles (
+    AstrologerId BIGINT NOT NULL PRIMARY KEY,  -- logical link to Users(UserId)
+    DisplayName NVARCHAR(200) NOT NULL,
+    Bio NVARCHAR(MAX) NULL,
+    ExperienceYears INT NULL,
+    LanguagesCsv NVARCHAR(200) NULL,
+    SpecializationsCsv NVARCHAR(200) NULL,
+    PricePerMinute DECIMAL(10,2) NOT NULL,
+    Status NVARCHAR(50) NOT NULL,              -- applied, verified, active, suspended
+    CreatedUtc DATETIME2 NOT NULL,
+    VerifiedUtc DATETIME2 NULL
+  );
+END
+
+
+-- Availability (NO FK)
+IF OBJECT_ID('dbo.AstrologerAvailability','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.AstrologerAvailability (
+    AvailabilityId BIGINT IDENTITY PRIMARY KEY,
+    AstrologerId BIGINT NOT NULL,
+    DayOfWeek INT NOT NULL,                    -- 0=Sun..6=Sat
+    StartTime TIME NOT NULL,
+    EndTime TIME NOT NULL,
+    IsActive BIT NOT NULL DEFAULT 1,
+    CreatedUtc DATETIME2 NOT NULL
+  );
+END
+
+
+-- Chat sessions
+IF OBJECT_ID('dbo.ChatSessions','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.ChatSessions (
+    ChatSessionId BIGINT IDENTITY PRIMARY KEY,
+    ConsumerId BIGINT NOT NULL,
+    AstrologerId BIGINT NOT NULL,
+    Status NVARCHAR(50) NOT NULL,              -- requested, accepted, active, ended, cancelled
+    RequestedUtc DATETIME2 NOT NULL,
+    AcceptedUtc DATETIME2 NULL,
+    StartedUtc DATETIME2 NULL,
+    EndedUtc DATETIME2 NULL,
+    RatePerMinute DECIMAL(10,2) NOT NULL,
+    Topic NVARCHAR(200) NULL
+  );
+END
+
+
+-- Chat messages (NO FK, NO CASCADE)
+IF OBJECT_ID('dbo.ChatMessages','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.ChatMessages (
+    MessageId BIGINT IDENTITY PRIMARY KEY,
+    ChatSessionId BIGINT NOT NULL,
+    SenderUserId BIGINT NOT NULL,
+    Message NVARCHAR(MAX) NOT NULL,
+    CreatedUtc DATETIME2 NOT NULL
+  );
+
+  CREATE INDEX IX_ChatMessages_SessionCreated
+    ON dbo.ChatMessages(ChatSessionId, CreatedUtc);
+END

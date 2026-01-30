@@ -17,6 +17,9 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Astro.Domain.Interface;
 using Astro.Domain.ApiUsage;
+using Astro.Domain.Chat;
+using Astro.Domain.Marketplace;
+using Astro.Api.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,6 +52,11 @@ builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
 builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
 builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
 
+builder.Services.AddScoped<IAstrologerProfileRepository, AstrologerProfileRepository>();
+builder.Services.AddScoped<IAstrologerAvailabilityRepository, AstrologerAvailabilityRepository>();
+builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
+builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
+
 
 
 // =====================================================
@@ -58,6 +66,8 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ApiKeyService>();
 builder.Services.AddSingleton<IEphemerisService, PlaceholderEphemerisService>();
+builder.Services.AddSignalR();
+
 
 // =====================================================
 // Authentication (JWT)
@@ -251,7 +261,7 @@ app.UseWhen(
 
 app.UseAuthorization();
 
-app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.MapGet("/health", () =>
     Results.Ok(new
