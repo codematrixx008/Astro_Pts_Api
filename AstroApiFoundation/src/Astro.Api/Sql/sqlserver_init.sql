@@ -89,3 +89,18 @@ BEGIN
     CREATE INDEX IX_ApiUsageLogs_UserId
     ON dbo.ApiUsageLogs(UserId);
 END;
+
+IF OBJECT_ID('dbo.ApiUsageCounters', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ApiUsageCounters (
+        ApiKeyId       BIGINT NOT NULL,
+        DateUtc        DATE NOT NULL,
+        RequestCount   INT NOT NULL,
+        CONSTRAINT PK_ApiUsageCounters
+            PRIMARY KEY (ApiKeyId, DateUtc)
+    );
+END;
+
+CREATE INDEX IX_ApiUsageCounters_DateUtc
+ON dbo.ApiUsageCounters (DateUtc);
+

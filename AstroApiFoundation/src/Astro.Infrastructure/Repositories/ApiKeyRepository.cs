@@ -68,4 +68,22 @@ public sealed class ApiKeyRepository : IApiKeyRepository
                     WHERE ApiKeyId = @ApiKeyId;";
         await conn.ExecuteAsync(new CommandDefinition(sql, new { ApiKeyId = apiKeyId, LastUsedUtc = lastUsedUtc }, cancellationToken: ct));
     }
+
+    public async Task UpdatePlanAsync(long apiKeyId, long orgId, string planCode, int dailyQuota, CancellationToken ct)
+    {
+        using var conn = _db.Create();
+
+        const string sql = @"
+        UPDATE dbo.ApiKeys
+        SET PlanCode   = @PlanCode,
+            DailyQuota = @DailyQuota
+              WHERE ApiKeyId = @ApiKeyId
+              AND OrgId    = @OrgId; ";
+
+        await conn.ExecuteAsync(new CommandDefinition( sql,new{ApiKeyId = apiKeyId, OrgId = orgId, PlanCode = planCode, DailyQuota = dailyQuota}, cancellationToken: ct)
+        );
+    }
+
 }
+
+

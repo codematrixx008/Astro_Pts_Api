@@ -16,6 +16,7 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Threading.RateLimiting;
 using Astro.Domain.Interface;
+using Astro.Domain.ApiUsage;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,6 +47,9 @@ builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
 builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
+builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
+builder.Services.AddScoped<ApiQuotaMiddleware>();
+
 
 
 // =====================================================
@@ -232,6 +236,8 @@ app.UseWhen(
         appBuilder.UseAuthentication();
         appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
         appBuilder.UseAuthorization();
+        appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
+        appBuilder.UseMiddleware<ApiQuotaMiddleware>(); // NEW (after auth)
     });
 
 app.UseAuthorization();

@@ -33,6 +33,7 @@ public interface IApiKeyRepository
     Task<ApiKey?> GetActiveByPrefixAsync(string prefix, CancellationToken ct);
     Task RevokeAsync(long apiKeyId, DateTime revokedUtc, CancellationToken ct);
     Task TouchLastUsedAsync(long apiKeyId, DateTime lastUsedUtc, CancellationToken ct);
+    Task UpdatePlanAsync(long apiKeyId, long orgId, string planCode, int dailyQuota, CancellationToken ct);
 }
 
 public interface IApiUsageLogRepository
