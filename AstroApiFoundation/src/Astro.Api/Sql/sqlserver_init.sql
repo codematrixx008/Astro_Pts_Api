@@ -199,3 +199,75 @@ BEGIN
         CONSTRAINT FK_ApiUsageCounters_ApiKeys FOREIGN KEY (ApiKeyId) REFERENCES dbo.ApiKeys(ApiKeyId)
     );
 END;
+
+-- ==========================
+-- Chat / Messaging
+-- ==========================
+IF OBJECT_ID(N'dbo.ChatSessions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ChatSessions (
+        ChatSessionId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ConsumerId BIGINT NOT NULL,
+        AstrologerId BIGINT NOT NULL,
+        ScheduledStartUtc DATETIME2(0) NOT NULL,
+        ScheduledEndUtc   DATETIME2(0) NOT NULL,
+        Status NVARCHAR(20) NOT NULL, -- requested | accepted | active | ended | canceled
+        CreatedUtc DATETIME2(0) NOT NULL,
+        AcceptedUtc DATETIME2(0) NULL,
+        StartedUtc DATETIME2(0) NULL,
+        EndedUtc DATETIME2(0) NULL,
+
+        PricePerMinuteSnapshot DECIMAL(10,2) NOT NULL,
+        PlatformFeePctSnapshot DECIMAL(5,2) NOT NULL,
+        AstrologerSharePctSnapshot DECIMAL(5,2) NOT NULL,
+
+        Notes NVARCHAR(500) NULL,
+
+        CONSTRAINT FK_ChatSessions_Consumer FOREIGN KEY (ConsumerId) REFERENCES dbo.Users(UserId),
+        CONSTRAINT FK_ChatSessions_Astrologer FOREIGN KEY (AstrologerId) REFERENCES dbo.Users(UserId)
+    );
+
+    CREATE INDEX IX_ChatSessions_ConsumerId ON dbo.ChatSessions(ConsumerId, CreatedUtc DESC);
+    CREATE INDEX IX_ChatSessions_AstrologerId ON dbo.ChatSessions(AstrologerId, CreatedUtc DESC);
+    CREATE INDEX IX_ChatSessions_Status ON dbo.ChatSessions(Status);
+END;
+
+IF OBJECT_ID(N'dbo.ChatMessages', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ChatMessages (
+        ChatMessageId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ChatSessionId BIGINT NOT NULL,
+        SenderUserId BIGINT NOT NULL,
+        MessageText NVARCHAR(2000) NOT NULL,
+        CreatedUtc DATETIME2(0) NOT NULL,
+
+        CONSTRAINT FK_ChatMessages_Session FOREIGN KEY (ChatSessionId) REFERENCES dbo.ChatSessions(ChatSessionId) ON DELETE CASCADE,
+        CONSTRAINT FK_ChatMessages_Sender FOREIGN KEY (SenderUserId) REFERENCES dbo.Users(UserId)
+    );
+
+    CREATE INDEX IX_ChatMessages_SessionId ON dbo.ChatMessages(ChatSessionId, CreatedUtc ASC);
+END;
+
+-- ==========================
+-- Billing / Ledger (MVP, no external payment gateway)
+-- ==========================
+IF OBJECT_ID(N'dbo.LedgerTransactions', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.LedgerTransactions (
+        LedgerTransactionId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ChatSessionId BIGINT NULL,
+        UserId BIGINT NOT NULL,
+        EntryType NVARCHAR(30) NOT NULL, -- consumer_debit | astrologer_credit | platform_commission
+        Amount DECIMAL(12,2) NOT NULL,
+        Currency NVARCHAR(10) NOT NULL,
+        CreatedUtc DATETIME2(0) NOT NULL,
+        MetaJson NVARCHAR(MAX) NULL,
+
+        CONSTRAINT FK_LedgerTransactions_User FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId),
+        CONSTRAINT FK_LedgerTransactions_ChatSession FOREIGN KEY (ChatSessionId) REFERENCES dbo.ChatSessions(ChatSessionId)
+    );
+
+    CREATE INDEX IX_LedgerTransactions_UserId ON dbo.LedgerTransactions(UserId, CreatedUtc DESC);
+    CREATE INDEX IX_LedgerTransactions_ChatSessionId ON dbo.LedgerTransactions(ChatSessionId);
+END;
+

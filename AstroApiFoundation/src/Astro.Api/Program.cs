@@ -1,24 +1,27 @@
 using Astro.Application.Auth;
 using Astro.Application.ApiKeys;
+using Astro.Application.Billing;
 using Astro.Application.Common;
 using Astro.Application.Ephemeris;
 using Astro.Application.Security;
 using Astro.Domain.Auth;
 using Astro.Domain.ApiUsage;
+using Astro.Domain.Billing;
+using Astro.Domain.Chat;
 using Astro.Domain.Marketplace;
 using Astro.Infrastructure.Data;
 using Astro.Infrastructure.Repositories;
-using Astro.Api.Security;
-using Astro.Api.Middleware;
 using Astro.Api.Authorization;
+using Astro.Api.Hubs;
+using Astro.Api.Middleware;
+using Astro.Api.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
-using System.Security.Claims;
-using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,12 +31,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<AuthCookieOptions>(builder.Configuration.GetSection("AuthCookies"));
 
-builder.Services.Configure<AuthCookieOptions>(builder.Configuration.GetSection("AuthCookies"));
-
 var dbOpts = new DbOptions();
 builder.Configuration.GetSection("Db").Bind(dbOpts);
 builder.Services.AddSingleton(dbOpts);
-builder.Services.AddSingleton<IDbConnectionFactory>(sp => new DbConnectionFactory(dbOpts));
+builder.Services.AddSingleton<IDbConnectionFactory>(_ => new DbConnectionFactory(dbOpts));
 builder.Services.AddSingleton<DbInitializer>();
 
 builder.Services.AddSingleton<IClock, SystemClock>();
@@ -66,9 +67,15 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
 builder.Services.AddScoped<IUserOrganizationRepository, UserOrganizationRepository>();
-builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+
+// Multi-role + sessions
 builder.Services.AddScoped<IUserRoleRepository, UserRoleRepository>();
 builder.Services.AddScoped<IUserSessionRepository, UserSessionRepository>();
+
+// Legacy refresh token table (kept for compatibility; not used by cookie-session auth)
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+
+// API key product + usage
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
 builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
@@ -77,24 +84,25 @@ builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository
 builder.Services.AddScoped<IAstrologerProfileRepository, AstrologerProfileRepository>();
 builder.Services.AddScoped<IAstrologerAvailabilityRepository, AstrologerAvailabilityRepository>();
 
+// Chat
+builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
+builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
+
+// Billing / Ledger
+builder.Services.AddScoped<ILedgerRepository, LedgerRepository>();
+
 // =====================================================
 // Application Services
 // =====================================================
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ApiKeyService>();
+builder.Services.AddScoped<BillingService>();
+
 builder.Services.AddSingleton<IEphemerisService, PlaceholderEphemerisService>();
 
-// CORS for React UI (cookie-based refresh uses credentials)
- uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:5173";
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("ui", policy =>
-        policy.WithOrigins(uiOrigin)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials());
-});
+// SignalR
+builder.Services.AddSignalR();
 
 // =====================================================
 // Auth (JWT for portal endpoints)
@@ -108,7 +116,7 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opts =>
     {
-        opts.RequireHttpsMetadata = false; // dev
+        opts.RequireHttpsMetadata = false; // dev only
         opts.TokenValidationParameters = new TokenValidationParameters
         {
             ValidIssuer = issuer,
@@ -121,6 +129,19 @@ builder.Services
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = ClaimTypes.Role,
             NameClaimType = ClaimTypes.NameIdentifier
+        };
+
+        // Allow SignalR access tokens over query string: /hubs/chat?access_token=...
+        opts.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var path = context.HttpContext.Request.Path;
+                var accessToken = context.Request.Query["access_token"].ToString();
+                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments("/hubs/chat"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -168,7 +189,6 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Astro API Foundation", Version = "v1" });
 
-    // Bearer
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.Http,
@@ -177,7 +197,6 @@ builder.Services.AddSwaggerGen(c =>
         Description = "JWT Authorization header using the Bearer scheme."
     });
 
-    // ApiKey
     c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.ApiKey,
@@ -218,14 +237,12 @@ app.UseHttpsRedirection();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-app.UseCors("ui");
-
+// Rate limiter early
 app.UseRateLimiter();
 
 // Usage logging should see the final status code
 app.UseMiddleware<ApiUsageLoggingMiddleware>();
 
-// JWT auth (used for portal endpoints)
 app.UseAuthentication();
 
 // API Key auth for /v1/* endpoints (machine access)
@@ -238,6 +255,7 @@ app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/v1"), appBuilder =>
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.MapGet("/health", () => Results.Ok(new { ok = true, utc = DateTime.UtcNow })).AllowAnonymous();
 

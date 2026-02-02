@@ -1,3 +1,4 @@
+﻿
 ﻿namespace Astro.Api.Middleware;
 
 public sealed class ExceptionHandlingMiddleware
