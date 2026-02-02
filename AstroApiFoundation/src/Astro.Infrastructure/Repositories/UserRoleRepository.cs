@@ -1,4 +1,4 @@
-﻿using Astro.Domain.Auth;
+using Astro.Domain.Auth;
 using Astro.Infrastructure.Data;
 using Dapper;
 
@@ -17,9 +17,9 @@ FROM dbo.UserRoles ur
 JOIN dbo.Roles r ON r.RoleId = ur.RoleId
 WHERE ur.UserId = @UserId AND r.IsActive = 1
 ORDER BY r.Code;";
+
         using var conn = _db.Create();
-        var rows = await conn.QueryAsync<string>(
-            new CommandDefinition(sql, new { UserId = userId }, cancellationToken: ct));
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(sql, new { UserId = userId }, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -35,8 +35,8 @@ BEGIN
     INSERT INTO dbo.UserRoles(UserId, RoleId, CreatedBy)
     VALUES (@UserId, @RoleId, @CreatedBy);
 END";
+
         using var conn = _db.Create();
-        await conn.ExecuteAsync(
-            new CommandDefinition(sql, new { UserId = userId, Code = roleCode, CreatedBy = createdBy }, cancellationToken: ct));
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { UserId = userId, Code = roleCode, CreatedBy = createdBy }, cancellationToken: ct));
     }
 }

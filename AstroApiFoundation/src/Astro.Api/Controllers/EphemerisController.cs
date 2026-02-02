@@ -1,5 +1,5 @@
-using Astro.Application.Common;
 using Astro.Application.Ephemeris;
+using Astro.Application.Common;
 using Astro.Api.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -21,38 +21,16 @@ public sealed class EphemerisController : ControllerBase
         CancellationToken ct)
     {
         if (!DateTimeOffset.TryParse(datetimeUtc, out var dto))
-            return BadRequest("Invalid datetimeUtc. Use ISO8601 UTC.");
+            return BadRequest(new { error = "invalid_datetimeUtc", message = "Use ISO8601 UTC like 2026-01-30T00:00:00Z" });
 
-        var dt = dto.UtcDateTime;
-        Validation.EnsureUtcAndRange(dt);
+        if (dto.Offset != TimeSpan.Zero)
+            return BadRequest(new { error = "datetimeUtc_must_be_utc", message = "datetimeUtc must have Z/UTC offset" });
 
-        var resp = await _ephemeris.GetPlanetPositionsAsync(
-            new PlanetPositionRequest(dt), ct);
+        var input = dto.UtcDateTime;
+        try { Validation.EnsureUtcAndRange(input); }
+        catch (Exception ex) { return BadRequest(new { error = "invalid_datetimeUtc", message = ex.Message }); }
 
+        var resp = await _ephemeris.GetPlanetPositionsAsync(new PlanetPositionRequest(input), ct);
         return Ok(resp);
-    }
-
-    [HttpGet("ascendant")]
-    [Authorize(Policy = ScopePolicies.EphemerisRead)]
-    public IActionResult GetAscendant(
-        [FromQuery] string datetimeUtc,
-        [FromQuery] double lat,
-        [FromQuery] double lon)
-    {
-        if (!DateTimeOffset.TryParse(datetimeUtc, out var dto))
-            return BadRequest("Invalid datetimeUtc.");
-
-        var dt = dto.UtcDateTime;
-        Validation.EnsureUtcAndRange(dt);
-        Validation.EnsureLatLon(lat, lon);
-
-        return Ok(new
-        {
-            datetimeUtc = dt,
-            lat,
-            lon,
-            ayanamsa = "lahiri",
-            ascendantLongitudeDeg = 0.0
-        });
     }
 }

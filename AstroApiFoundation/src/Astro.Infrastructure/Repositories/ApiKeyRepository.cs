@@ -10,11 +10,11 @@ public sealed class ApiKeyRepository : IApiKeyRepository
 
     public ApiKeyRepository(IDbConnectionFactory db) => _db = db;
 
-    public async Task<long> CreateAsync(long orgId, string name, string prefix, string secretHash, string scopesCsv, CancellationToken ct)
+    public async Task<long> CreateAsync(long orgId, string name, string prefix, string secretHash, string scopesCsv, int? dailyQuota, string? planCode, CancellationToken ct)
     {
         using var conn = _db.Create();
-        var sql = @"INSERT INTO ApiKeys(OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc)
-                    VALUES(@OrgId, @Name, @Prefix, @SecretHash, @ScopesCsv, 1, @CreatedUtc, NULL, NULL);
+        var sql = @"INSERT INTO ApiKeys(OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc, DailyQuota, PlanCode)
+                    VALUES(@OrgId, @Name, @Prefix, @SecretHash, @ScopesCsv, 1, @CreatedUtc, NULL, NULL, @DailyQuota, @PlanCode);
                     SELECT CAST(SCOPE_IDENTITY() as bigint);";
         return await conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, new
         {
@@ -23,6 +23,8 @@ public sealed class ApiKeyRepository : IApiKeyRepository
             Prefix = prefix,
             SecretHash = secretHash,
             ScopesCsv = scopesCsv,
+            DailyQuota = dailyQuota,
+            PlanCode = planCode,
             CreatedUtc = DateTime.UtcNow
         }, cancellationToken: ct));
     }
@@ -30,7 +32,7 @@ public sealed class ApiKeyRepository : IApiKeyRepository
     public async Task<IReadOnlyList<ApiKey>> ListAsync(long orgId, CancellationToken ct)
     {
         using var conn = _db.Create();
-        var sql = @"SELECT ApiKeyId, OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc
+        var sql = @"SELECT ApiKeyId, OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc, DailyQuota, PlanCode
                     FROM ApiKeys
                     WHERE OrgId = @OrgId
                     ORDER BY ApiKeyId DESC;";
@@ -41,11 +43,12 @@ public sealed class ApiKeyRepository : IApiKeyRepository
     public async Task<ApiKey?> GetActiveByPrefixAsync(string prefix, CancellationToken ct)
     {
         using var conn = _db.Create();
-        var sql = @"SELECT ApiKeyId, OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc
+        var sql = @"SELECT ApiKeyId, OrgId, Name, Prefix, SecretHash, ScopesCsv, IsActive, CreatedUtc, LastUsedUtc, RevokedUtc, DailyQuota, PlanCode
                     FROM ApiKeys
                     WHERE Prefix = @Prefix
                       AND IsActive = 1
-                      AND RevokedUtc IS NULL;";
+                      AND RevokedUtc IS NULL;
+";
         return await conn.QueryFirstOrDefaultAsync<ApiKey>(new CommandDefinition(sql, new { Prefix = prefix }, cancellationToken: ct));
     }
 
@@ -67,22 +70,4 @@ public sealed class ApiKeyRepository : IApiKeyRepository
                     WHERE ApiKeyId = @ApiKeyId;";
         await conn.ExecuteAsync(new CommandDefinition(sql, new { ApiKeyId = apiKeyId, LastUsedUtc = lastUsedUtc }, cancellationToken: ct));
     }
-
-    public async Task UpdatePlanAsync(long apiKeyId, long orgId, string planCode, int dailyQuota, CancellationToken ct)
-    {
-        using var conn = _db.Create();
-
-        const string sql = @"
-        UPDATE dbo.ApiKeys
-        SET PlanCode   = @PlanCode,
-            DailyQuota = @DailyQuota
-              WHERE ApiKeyId = @ApiKeyId
-              AND OrgId    = @OrgId; ";
-
-        await conn.ExecuteAsync(new CommandDefinition( sql,new{ApiKeyId = apiKeyId, OrgId = orgId, PlanCode = planCode, DailyQuota = dailyQuota}, cancellationToken: ct)
-        );
-    }
-
 }
-
-

@@ -1,7 +1,11 @@
-﻿using Astro.Domain.ApiUsage;
+using Astro.Domain.ApiUsage;
 
 namespace Astro.Api.Middleware;
 
+/// <summary>
+/// Enforces per-API-key daily quota (if configured on the ApiKey).
+/// Must run after ApiKeyAuthMiddleware so ApiKeyContext is available.
+/// </summary>
 public sealed class ApiQuotaMiddleware
 {
     private readonly RequestDelegate _next;
@@ -10,27 +14,32 @@ public sealed class ApiQuotaMiddleware
 
     public async Task InvokeAsync(HttpContext context, IApiUsageCounterRepository counters)
     {
+        var ct = context.RequestAborted;
         var apiCtx = context.GetApiKeyContext();
-        if (apiCtx is null || apiCtx.DailyQuota is null)
+        if (apiCtx is null)
         {
             await _next(context);
             return;
         }
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var used = await counters.IncrementDailyAsync(apiCtx.ApiKeyId, today, context.RequestAborted);
+        if (apiCtx.DailyQuota is null or <= 0)
+        {
+            await _next(context);
+            return;
+        }
 
-        context.Response.Headers["X-Quota-Daily"] = apiCtx.DailyQuota.Value.ToString();
-        context.Response.Headers["X-Usage-Daily"] = used.ToString();
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        var count = await counters.IncrementDailyAsync(apiCtx.ApiKeyId, todayUtc, ct);
 
-        if (used > apiCtx.DailyQuota.Value)
+        if (count > apiCtx.DailyQuota.Value)
         {
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsJsonAsync(new
             {
                 error = "quota_exceeded",
-                message = "Daily quota exceeded for this API key."
-            }, context.RequestAborted);
+                quota = apiCtx.DailyQuota.Value,
+                used = count
+            }, ct);
             return;
         }
 

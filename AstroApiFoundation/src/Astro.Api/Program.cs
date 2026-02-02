@@ -1,9 +1,11 @@
-﻿using Astro.Application.Auth;
+using Astro.Application.Auth;
 using Astro.Application.ApiKeys;
 using Astro.Application.Common;
 using Astro.Application.Ephemeris;
 using Astro.Application.Security;
 using Astro.Domain.Auth;
+using Astro.Domain.ApiUsage;
+using Astro.Domain.Marketplace;
 using Astro.Infrastructure.Data;
 using Astro.Infrastructure.Repositories;
 using Astro.Api.Security;
@@ -15,30 +17,48 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Threading.RateLimiting;
-using Astro.Domain.Interface;
-using Astro.Domain.ApiUsage;
-using Astro.Domain.Chat;
-using Astro.Domain.Marketplace;
-using Astro.Api.Hubs;
+using System.Security.Claims;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // =====================================================
 // Configuration
 // =====================================================
-builder.Services.Configure<JwtOptions>(
-    builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<AuthCookieOptions>(builder.Configuration.GetSection("AuthCookies"));
 
-var dbOptions = new DbOptions();
-builder.Configuration.GetSection("Db").Bind(dbOptions);
+builder.Services.Configure<AuthCookieOptions>(builder.Configuration.GetSection("AuthCookies"));
 
-builder.Services.AddSingleton(dbOptions);
-builder.Services.AddSingleton<IDbConnectionFactory>(
-    _ => new DbConnectionFactory(dbOptions));
-
+var dbOpts = new DbOptions();
+builder.Configuration.GetSection("Db").Bind(dbOpts);
+builder.Services.AddSingleton(dbOpts);
+builder.Services.AddSingleton<IDbConnectionFactory>(sp => new DbConnectionFactory(dbOpts));
 builder.Services.AddSingleton<DbInitializer>();
+
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddSingleton(new Pbkdf2Hasher());
+
+// Deterministic refresh-token hashing (sessions)
+builder.Services.AddSingleton(sp =>
+{
+    var key = builder.Configuration["RefreshTokens:HashKey"]
+        ?? throw new Exception("RefreshTokens:HashKey missing.");
+    return new RefreshTokenHasher(key);
+});
+
+// CORS for React UI (cookie auth needs AllowCredentials)
+var uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:5173";
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ui", policy =>
+    {
+        policy.WithOrigins(uiOrigin)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 // =====================================================
 // Repositories (Dapper)
@@ -47,20 +67,15 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
 builder.Services.AddScoped<IUserOrganizationRepository, UserOrganizationRepository>();
 builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+builder.Services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+builder.Services.AddScoped<IUserSessionRepository, UserSessionRepository>();
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
 builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
-builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
 builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
 
+// Marketplace
 builder.Services.AddScoped<IAstrologerProfileRepository, AstrologerProfileRepository>();
 builder.Services.AddScoped<IAstrologerAvailabilityRepository, AstrologerAvailabilityRepository>();
-builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
-builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
-builder.Services.AddScoped<IUserRoleRepository, UserRoleRepository>();
-
-
-
-
 
 // =====================================================
 // Application Services
@@ -69,86 +84,74 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ApiKeyService>();
 builder.Services.AddSingleton<IEphemerisService, PlaceholderEphemerisService>();
-builder.Services.AddSignalR();
 
+// CORS for React UI (cookie-based refresh uses credentials)
+ uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:5173";
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ui", policy =>
+        policy.WithOrigins(uiOrigin)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials());
+});
 
 // =====================================================
-// Authentication (JWT)
+// Auth (JWT for portal endpoints)
 // =====================================================
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var signingKey = jwtSection.GetValue<string>("SigningKey")
-    ?? throw new Exception("Jwt:SigningKey missing");
-
+var signingKey = jwtSection.GetValue<string>("SigningKey") ?? throw new Exception("Jwt:SigningKey missing.");
 var issuer = jwtSection.GetValue<string>("Issuer") ?? "Astro.Api";
 var audience = jwtSection.GetValue<string>("Audience") ?? "Astro.Api";
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    .AddJwtBearer(opts =>
     {
-        options.RequireHttpsMetadata = false; // dev only
-        options.TokenValidationParameters = new TokenValidationParameters
+        opts.RequireHttpsMetadata = false; // dev
+        opts.TokenValidationParameters = new TokenValidationParameters
         {
             ValidIssuer = issuer,
             ValidAudience = audience,
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(signingKey)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromSeconds(30)
+            ClockSkew = TimeSpan.FromSeconds(30),
+            RoleClaimType = ClaimTypes.Role,
+            NameClaimType = ClaimTypes.NameIdentifier
         };
     });
 
-// =====================================================
-// Authorization
-// =====================================================
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy(ScopePolicies.PanchangRead, policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(ctx =>
-            ctx.User.HasClaim("scope", "panchang.read"));
-    });
-
-    options.AddPolicy(ScopePolicies.EphemerisRead, policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(ctx =>
-            ctx.User.HasClaim("scope", "ephemeris.read"));
-    });
+    options.AddPolicy(ScopePolicies.EphemerisRead, p =>
+        p.Requirements.Add(new ScopeRequirement("ephemeris.read")));
 });
 
-
-
-builder.Services.AddSingleton<
-    Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
-    ScopeAuthorizationHandler>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopeAuthorizationHandler>();
 
 // =====================================================
-// Rate Limiting
+// Rate limiting (partition by API key id)
 // =====================================================
-var permitLimit = builder.Configuration
-    .GetSection("RateLimiting")
-    .GetValue<int>("PermitLimitPerMinute", 60);
+var permitLimit = builder.Configuration.GetSection("RateLimiting").GetValue<int>("PermitLimitPerMinute", 60);
 
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddPolicy("api", context =>
+    options.AddPolicy("api", httpContext =>
     {
-        var apiContext = context.GetApiKeyContext();
-        var key = apiContext?.ApiKeyId.ToString() ?? "anonymous";
+        var apiCtx = httpContext.GetApiKeyContext();
+        var partitionKey = apiCtx?.ApiKeyId.ToString() ?? "anon";
 
         return RateLimitPartition.GetFixedWindowLimiter(
-            key,
-            _ => new FixedWindowRateLimiterOptions
+            partitionKey: partitionKey,
+            factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = permitLimit,
                 Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
                 AutoReplenishment = true
             });
     });
@@ -161,52 +164,32 @@ builder.Services.AddRateLimiter(options =>
 // =====================================================
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "Astro API Foundation",
-        Version = "v1"
-    });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Astro API Foundation", Version = "v1" });
 
+    // Bearer
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.Http,
         Scheme = "bearer",
-        BearerFormat = "JWT"
+        BearerFormat = "JWT",
+        Description = "JWT Authorization header using the Bearer scheme."
     });
 
+    // ApiKey
     c.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.ApiKey,
         Name = "X-Api-Key",
         In = ParameterLocation.Header,
-        Description = "API Key header"
+        Description = "API key header. Format: <prefix>.<secret>"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        },
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "ApiKey"
-                }
-            },
+            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
             Array.Empty<string>()
         }
     });
@@ -214,65 +197,48 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// =====================================================
-// Database Init
-// =====================================================
+// Initialize DB
 using (var scope = app.Services.CreateScope())
 {
-    var initializer = scope.ServiceProvider
-        .GetRequiredService<DbInitializer>();
-
-    await initializer.InitializeAsync(CancellationToken.None);
+    var init = scope.ServiceProvider.GetRequiredService<DbInitializer>();
+    await init.InitializeAsync(CancellationToken.None);
 }
 
-// =====================================================
-// 🚀 AUTO REDIRECT ROOT → SWAGGER
-// =====================================================
-app.Use(async (context, next) =>
-{
-    if (context.Request.Path == "/")
-    {
-        context.Response.Redirect("/swagger/index.html");
-        return;
-    }
-    await next();
-});
-
-// =====================================================
-// Middleware Pipeline
-// =====================================================
 app.UseSwagger();
 app.UseSwaggerUI();
 
+app.UseCors("ui");
+
+app.UseCookiePolicy(new CookiePolicyOptions
+{
+    MinimumSameSitePolicy = SameSiteMode.Lax
+});
+
 app.UseHttpsRedirection();
 
-// Rate limiter early
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+app.UseCors("ui");
+
 app.UseRateLimiter();
 
+// Usage logging should see the final status code
 app.UseMiddleware<ApiUsageLoggingMiddleware>();
 
+// JWT auth (used for portal endpoints)
 app.UseAuthentication();
 
-app.UseWhen(
-    ctx => ctx.Request.Path.StartsWithSegments("/v1"),
-    appBuilder =>
-    {
-        appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
-        appBuilder.UseMiddleware<ApiQuotaMiddleware>();
-        appBuilder.UseAuthorization();
-    });
+// API Key auth for /v1/* endpoints (machine access)
+app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/v1"), appBuilder =>
+{
+    appBuilder.UseMiddleware<ApiKeyAuthMiddleware>();
+    appBuilder.UseMiddleware<ApiQuotaMiddleware>();
+});
 
 app.UseAuthorization();
 
-app.MapHub<ChatHub>("/hubs/chat");
 app.MapControllers();
 
-app.MapGet("/health", () =>
-    Results.Ok(new
-    {
-        ok = true,
-        utc = DateTime.UtcNow
-    }))
-    .AllowAnonymous();
+app.MapGet("/health", () => Results.Ok(new { ok = true, utc = DateTime.UtcNow })).AllowAnonymous();
 
 app.Run();

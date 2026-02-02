@@ -1,4 +1,4 @@
-﻿using Astro.Api.Common;
+using Astro.Api.Common;
 using Astro.Application.Marketplace;
 using Astro.Domain.Marketplace;
 using Microsoft.AspNetCore.Authorization;
@@ -29,6 +29,12 @@ public sealed class AstrologersController : ControllerBase
         var existing = await _profiles.GetByIdAsync(userId, ct);
         if (existing is not null)
             return Conflict(new { error = "already_applied" });
+
+        if (req.ExperienceYears < 0 || req.ExperienceYears > 80)
+            return BadRequest(new { error = "invalid_experience_years" });
+
+        if (req.PricePerMinute < 0)
+            return BadRequest(new { error = "invalid_price" });
 
         var profile = new AstrologerProfile(
             AstrologerId: userId,
@@ -63,14 +69,13 @@ public sealed class AstrologersController : ControllerBase
         return Ok(new { ok = true, status = "active" });
     }
 
-    // Public listing (basic filter)
+    // Public listing
     [HttpGet]
     [AllowAnonymous]
     public async Task<IActionResult> List([FromQuery] string? language, [FromQuery] string? specialization, CancellationToken ct)
     {
-        // For MVP: keep simple. You can implement listing via SQL in repository later.
-        // Right now, you can just return "not implemented" or implement a List repo method.
-        return Ok(new { message = "Implement listing in repository (ListActiveAsync)." });
+        var rows = await _profiles.ListActiveAsync(language, specialization, ct);
+        return Ok(rows);
     }
 
     [HttpGet("{id:long}")]

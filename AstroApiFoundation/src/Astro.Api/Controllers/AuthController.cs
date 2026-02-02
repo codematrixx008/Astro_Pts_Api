@@ -1,9 +1,9 @@
-﻿using Astro.Api.Security;
 using Astro.Application.Auth;
-using Astro.Application.Security;
+using Astro.Api.Security;
 using Astro.Domain.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 
@@ -15,39 +15,51 @@ public sealed class AuthController : ControllerBase
 {
     private readonly AuthService _auth;
     private readonly JwtTokenService _jwt; // concrete for expired-token parsing
-    private readonly IUserRoleRepository _userRoles; // NEW (for /me)
+    private readonly IUserRoleRepository _roles;
+    private readonly AuthCookieOptions _cookie;
 
-    public AuthController(AuthService auth, IJwtTokenService jwt, IUserRoleRepository userRoles)
+    public AuthController(AuthService auth, IJwtTokenService jwt, IUserRoleRepository roles, IOptions<AuthCookieOptions> cookie)
     {
         _auth = auth;
         _jwt = (JwtTokenService)jwt;
-        _userRoles = userRoles;
+        _roles = roles;
+        _cookie = cookie.Value;
     }
 
     [HttpPost("register")]
     public async Task<ActionResult<AuthTokens>> Register(RegisterRequest req, CancellationToken ct)
     {
-        var (_, _, tokens) = await _auth.RegisterAsync(req, ct);
+        var ua = Request.Headers.UserAgent.ToString();
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        var (_, _, tokens, refreshPlain) = await _auth.RegisterAsync(req, ua, ip, ct);
+        SetRefreshCookie(refreshPlain, tokens.RefreshTokenExpiresUtc);
         return Ok(tokens);
     }
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthTokens>> Login(LoginRequest req, CancellationToken ct)
     {
-        var tokens = await _auth.LoginAsync(req, ct);
+        var ua = Request.Headers.UserAgent.ToString();
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        var (tokens, refreshPlain) = await _auth.LoginAsync(req, ua, ip, ct);
+        SetRefreshCookie(refreshPlain, tokens.RefreshTokenExpiresUtc);
         return Ok(tokens);
     }
 
     [HttpPost("refresh")]
-    public async Task<ActionResult<AuthTokens>> Refresh(RefreshRequest req, CancellationToken ct)
+    public async Task<ActionResult<AuthTokens>> Refresh(CancellationToken ct)
     {
+        if (!Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) || string.IsNullOrWhiteSpace(refreshPlain))
+            return Unauthorized(new { error = "missing_refresh_cookie" });
+
+        // Require (possibly expired) access token to identify user + org
         var bearer = Request.Headers.Authorization.ToString();
         if (string.IsNullOrWhiteSpace(bearer) || !bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             return Unauthorized(new { error = "missing_bearer_token" });
 
         var accessToken = bearer["Bearer ".Length..].Trim();
-
-        // Read expired token principal (ValidateLifetime=false)
         var principal = _jwt.GetPrincipalFromExpiredToken(accessToken);
         if (principal is null)
             return Unauthorized(new { error = "invalid_bearer_token" });
@@ -56,45 +68,78 @@ public sealed class AuthController : ControllerBase
         var orgId = long.Parse(principal.FindFirstValue("org_id")!);
         var email = principal.FindFirstValue(JwtRegisteredClaimNames.Email) ?? "";
 
-        // ✅ NEW: roles are loaded from DB inside AuthService.RefreshAsync
-        var tokens = await _auth.RefreshAsync(userId, orgId, email, req.RefreshToken, ct);
+        var ua = Request.Headers.UserAgent.ToString();
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        var (tokens, newRefresh) = await _auth.RefreshAsync(userId, orgId, email, refreshPlain, ua, ip, ct);
+        SetRefreshCookie(newRefresh, tokens.RefreshTokenExpiresUtc);
         return Ok(tokens);
     }
 
     [HttpPost("logout")]
-    public ActionResult Logout()
+    public async Task<IActionResult> Logout(CancellationToken ct)
     {
-        // MVP: client-side delete stored tokens.
+        if (Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) && !string.IsNullOrWhiteSpace(refreshPlain))
+            await _auth.LogoutAsync(refreshPlain, ct);
+
+        DeleteRefreshCookie();
         return Ok(new { ok = true });
     }
 
-    // ✅ NEW: "Me" endpoint for React UI
     [HttpGet("me")]
     [Authorize]
-    public async Task<ActionResult<MeResponse>> Me(CancellationToken ct)
+    public async Task<IActionResult> Me(CancellationToken ct)
     {
-        // from JWT
-        var userId = long.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
-        var orgId = long.Parse(User.FindFirstValue("org_id")!);
+        var userIdStr = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!long.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { error = "invalid_token" });
+
+        var orgIdStr = User.FindFirstValue("org_id") ?? "0";
+        _ = long.TryParse(orgIdStr, out var orgId);
+
         var email = User.FindFirstValue(JwtRegisteredClaimNames.Email) ?? "";
+        var roles = await _roles.GetRoleCodesAsync(userId, ct);
 
-        // roles from DB (source of truth)
-        var roles = await _userRoles.GetRoleCodesAsync(userId, ct);
+        return Ok(new { userId, orgId, email, roles });
+    }
 
-        return Ok(new MeResponse
+    private void SetRefreshCookie(string refreshTokenPlain, DateTime refreshExpiresUtc)
+    {
+        var sameSite = ParseSameSite(_cookie.SameSite);
+        var secure = sameSite == SameSiteMode.None; // browser requires Secure for SameSite=None
+
+        Response.Cookies.Append(_cookie.RefreshCookieName, refreshTokenPlain, new CookieOptions
         {
-            UserId = userId,
-            OrgId = orgId,
-            Email = email,
-            Roles = roles.ToArray()
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = sameSite,
+            Path = "/auth",
+            Expires = new DateTimeOffset(refreshExpiresUtc)
         });
     }
-}
 
-public sealed class MeResponse
-{
-    public long UserId { get; init; }
-    public long OrgId { get; init; }
-    public string Email { get; init; } = "";
-    public string[] Roles { get; init; } = Array.Empty<string>();
+    private void DeleteRefreshCookie()
+    {
+        var sameSite = ParseSameSite(_cookie.SameSite);
+        var secure = sameSite == SameSiteMode.None;
+
+        Response.Cookies.Delete(_cookie.RefreshCookieName, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = sameSite,
+            Path = "/auth"
+        });
+    }
+
+    private static SameSiteMode ParseSameSite(string? value)
+        => value?.Trim().ToLowerInvariant() switch
+        {
+            "none" => SameSiteMode.None,
+            "lax" => SameSiteMode.Lax,
+            "strict" => SameSiteMode.Strict,
+            _ => SameSiteMode.Lax
+        };
 }

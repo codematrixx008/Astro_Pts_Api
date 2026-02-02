@@ -27,7 +27,7 @@ public sealed class ApiKeyService
 
         var scopesCsv = string.Join(',', req.Scopes.Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase));
 
-        var apiKeyId = await _apiKeys.CreateAsync(orgId, req.Name.Trim(), prefix, secretHash, scopesCsv, ct);
+        var apiKeyId = await _apiKeys.CreateAsync(orgId, req.Name.Trim(), prefix, secretHash, scopesCsv, req.DailyQuota, req.PlanCode, ct);
 
         return new CreatedApiKey(
             ApiKeyId: apiKeyId,
@@ -35,6 +35,8 @@ public sealed class ApiKeyService
             Prefix: prefix,
             Secret: $"{prefix}.{secret}",
             Scopes: scopesCsv.Length == 0 ? Array.Empty<string>() : scopesCsv.Split(','),
+            DailyQuota: req.DailyQuota,
+            PlanCode: req.PlanCode,
             CreatedUtc: _clock.UtcNow
         );
     }
@@ -51,7 +53,9 @@ public sealed class ApiKeyService
             x.IsActive,
             x.CreatedUtc,
             x.LastUsedUtc,
-            x.RevokedUtc
+            x.RevokedUtc,
+            x.DailyQuota,
+            x.PlanCode
         )).ToList();
     }
 

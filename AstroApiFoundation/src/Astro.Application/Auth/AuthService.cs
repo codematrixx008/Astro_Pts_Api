@@ -9,68 +9,83 @@ public sealed class AuthService
     private readonly IUserRepository _users;
     private readonly IOrganizationRepository _orgs;
     private readonly IUserOrganizationRepository _userOrgs;
-    private readonly IRefreshTokenRepository _refreshTokens;
-    private readonly IUserRoleRepository _userRoles;     // NEW
+
+    private readonly IUserRoleRepository _roles;
+    private readonly IUserSessionRepository _sessions;
+
     private readonly IJwtTokenService _jwt;
-    private readonly Pbkdf2Hasher _hasher;
+    private readonly Pbkdf2Hasher _passwordHasher;
+    private readonly RefreshTokenHasher _refreshHasher;
     private readonly IClock _clock;
 
     public AuthService(
         IUserRepository users,
         IOrganizationRepository orgs,
         IUserOrganizationRepository userOrgs,
-        IRefreshTokenRepository refreshTokens,
-        IUserRoleRepository userRoles,                 // NEW
+        IUserRoleRepository roles,
+        IUserSessionRepository sessions,
         IJwtTokenService jwt,
-        Pbkdf2Hasher hasher,
+        Pbkdf2Hasher passwordHasher,
+        RefreshTokenHasher refreshHasher,
         IClock clock)
     {
         _users = users;
         _orgs = orgs;
         _userOrgs = userOrgs;
-        _refreshTokens = refreshTokens;
-        _userRoles = userRoles;                        // NEW
+        _roles = roles;
+        _sessions = sessions;
         _jwt = jwt;
-        _hasher = hasher;
+        _passwordHasher = passwordHasher;
+        _refreshHasher = refreshHasher;
         _clock = clock;
     }
 
-    public async Task<(long userId, long orgId, AuthTokens tokens)> RegisterAsync(RegisterRequest req, CancellationToken ct)
+    public async Task<(long userId, long orgId, AuthTokens tokens, string refreshTokenPlain)> RegisterAsync(
+        RegisterRequest req,
+        string? userAgent,
+        string? ip,
+        CancellationToken ct)
     {
         var email = req.Email.Trim().ToLowerInvariant();
 
         var existing = await _users.GetByEmailAsync(email, ct);
         if (existing is not null) throw new InvalidOperationException("User already exists.");
 
-        var pwdHash = _hasher.Hash(req.Password);
+        var pwdHash = _passwordHasher.Hash(req.Password);
         var userId = await _users.CreateAsync(email, pwdHash, ct);
 
         var orgId = await _orgs.CreateAsync(req.OrganizationName.Trim(), ct);
         await _userOrgs.AddOwnerAsync(userId, orgId, ct);
 
-        // NEW: assign multi-roles
-        // Everyone is a consumer
+        // Default onboarding role for everyone
+        await _roles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
 
-        //await _userRoles.EnsureUserHasRoleAsync(astrologerId, "astrologer", createdBy: adminUserId, ct);
+        var roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
+        var (tokens, refreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
 
+        var now = _clock.UtcNow;
+        var refreshHash = _refreshHasher.Hash(refreshPlain);
 
-        await _userRoles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
+        await _sessions.CreateAsync(new UserSession(
+            SessionId: 0,
+            UserId: userId,
+            RefreshTokenHash: refreshHash,
+            ExpiresUtc: tokens.RefreshTokenExpiresUtc,
+            CreatedUtc: now,
+            RevokedUtc: null,
+            ReplacedByTokenHash: null,
+            UserAgent: userAgent,
+            IpAddress: ip
+        ), ct);
 
-        // Optional: if you want org creator also to be admin at platform level:
-        // await _userRoles.EnsureUserHasRoleAsync(userId, "admin", createdBy: userId, ct);
-
-        var roles = await _userRoles.GetRoleCodesAsync(userId, ct);
-        var scopes = Array.Empty<string>(); // JWT scopes for portal
-
-        var tokens = _jwt.CreateTokens(userId, orgId, email, roles, scopes);
-
-        var refreshHash = _hasher.Hash(tokens.RefreshToken);
-        await _refreshTokens.CreateAsync(userId, refreshHash, tokens.RefreshTokenExpiresUtc, ct);
-
-        return (userId, orgId, tokens);
+        return (userId, orgId, tokens, refreshPlain);
     }
 
-    public async Task<AuthTokens> LoginAsync(LoginRequest req, CancellationToken ct)
+    public async Task<(AuthTokens tokens, string refreshTokenPlain)> LoginAsync(
+        LoginRequest req,
+        string? userAgent,
+        string? ip,
+        CancellationToken ct)
     {
         var email = req.Email.Trim().ToLowerInvariant();
         var user = await _users.GetByEmailAsync(email, ct)
@@ -78,54 +93,86 @@ public sealed class AuthService
 
         if (!user.IsActive) throw new UnauthorizedAccessException("User inactive.");
 
-        if (!_hasher.Verify(req.Password, user.PasswordHash))
+        if (!_passwordHasher.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid credentials.");
 
         var userOrgList = await _userOrgs.GetForUserAsync(user.UserId, ct);
         var primaryOrgId = userOrgList.FirstOrDefault()?.OrgId
             ?? throw new UnauthorizedAccessException("No organization assigned.");
 
-        // NEW: roles come from UserRoles table
-        var roles = await _userRoles.GetRoleCodesAsync(user.UserId, ct);
-
-        // Safety: always ensure at least consumer role exists
-        if (roles.Count == 0)
+        var roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
+        if (roleCodes.Count == 0)
         {
-            await _userRoles.EnsureUserHasRoleAsync(user.UserId, "consumer", createdBy: user.UserId, ct);
-            roles = await _userRoles.GetRoleCodesAsync(user.UserId, ct);
+            await _roles.EnsureUserHasRoleAsync(user.UserId, "consumer", createdBy: user.UserId, ct);
+            roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
         }
 
-        var tokens = _jwt.CreateTokens(user.UserId, primaryOrgId, user.Email, roles, Array.Empty<string>());
+        var (tokens, refreshPlain) = _jwt.CreateTokens(user.UserId, primaryOrgId, user.Email, roleCodes, Array.Empty<string>());
 
-        var refreshHash = _hasher.Hash(tokens.RefreshToken);
-        await _refreshTokens.CreateAsync(user.UserId, refreshHash, tokens.RefreshTokenExpiresUtc, ct);
+        var now = _clock.UtcNow;
+        var refreshHash = _refreshHasher.Hash(refreshPlain);
 
-        return tokens;
+        await _sessions.CreateAsync(new UserSession(
+            SessionId: 0,
+            UserId: user.UserId,
+            RefreshTokenHash: refreshHash,
+            ExpiresUtc: tokens.RefreshTokenExpiresUtc,
+            CreatedUtc: now,
+            RevokedUtc: null,
+            ReplacedByTokenHash: null,
+            UserAgent: userAgent,
+            IpAddress: ip
+        ), ct);
+
+        return (tokens, refreshPlain);
     }
 
-    // CHANGE: do NOT accept a single role string anymore.
-    // Fetch roles from DB to reflect upgrades (eg admin verified astrologer)
-    public async Task<AuthTokens> RefreshAsync(long userId, long orgId, string email, string refreshTokenPlain, CancellationToken ct)
+    public async Task<(AuthTokens tokens, string refreshTokenPlain)> RefreshAsync(
+        long userId,
+        long orgId,
+        string email,
+        string refreshTokenPlain,
+        string? userAgent,
+        string? ipAddress,
+        CancellationToken ct)
     {
         var now = _clock.UtcNow;
 
-        var token = await _refreshTokens.GetValidByPlainAsync(userId, refreshTokenPlain, now, ct)
+        var oldHash = _refreshHasher.Hash(refreshTokenPlain);
+        var session = await _sessions.GetByRefreshTokenHashAsync(oldHash, ct)
             ?? throw new UnauthorizedAccessException("Invalid refresh token.");
 
-        var roles = await _userRoles.GetRoleCodesAsync(userId, ct);
-        if (roles.Count == 0)
+        if (session.RevokedUtc is not null)
+            throw new UnauthorizedAccessException("Refresh token revoked.");
+
+        if (session.ExpiresUtc <= now)
+            throw new UnauthorizedAccessException("Refresh token expired.");
+
+        // Safety: ensure refresh token belongs to the same user
+        if (session.UserId != userId)
+            throw new UnauthorizedAccessException("Refresh token user mismatch.");
+
+        var roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
+        if (roleCodes.Count == 0)
         {
-            await _userRoles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
-            roles = await _userRoles.GetRoleCodesAsync(userId, ct);
+            await _roles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
+            roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
         }
 
-        var newTokens = _jwt.CreateTokens(userId, orgId, email, roles, Array.Empty<string>());
+        var (tokens, newRefreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
+        var newHash = _refreshHasher.Hash(newRefreshPlain);
 
-        await _refreshTokens.RevokeAsync(token.RefreshTokenId, now, replacedByTokenHash: null, ct);
+        await _sessions.RotateAsync(session.SessionId, newHash, tokens.RefreshTokenExpiresUtc, now, ct);
 
-        var newRefreshHash = _hasher.Hash(newTokens.RefreshToken);
-        await _refreshTokens.CreateAsync(userId, newRefreshHash, newTokens.RefreshTokenExpiresUtc, ct);
+        return (tokens, newRefreshPlain);
+    }
 
-        return newTokens;
+    public async Task LogoutAsync(string refreshTokenPlain, CancellationToken ct)
+    {
+        var hash = _refreshHasher.Hash(refreshTokenPlain);
+        var session = await _sessions.GetByRefreshTokenHashAsync(hash, ct);
+        if (session is null) return;
+
+        await _sessions.RevokeAsync(session.SessionId, _clock.UtcNow, ct);
     }
 }
