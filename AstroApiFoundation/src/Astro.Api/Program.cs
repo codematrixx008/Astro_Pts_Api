@@ -16,9 +16,21 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Threading.RateLimiting;
 using Astro.Domain.Interface;
+using System.Data;
+using Microsoft.Data.SqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
 
+
+//======================================================
+//IDB Connection
+//======================================================
+builder.Services.AddScoped<IDbConnection>(sp =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+    return new SqlConnection(connectionString);
+});
 // =====================================================
 // Configuration
 // =====================================================
@@ -51,6 +63,8 @@ builder.Services.AddScoped<IAvkahadaChakraRepository, AvkahadaChakraRepository>(
 builder.Services.AddScoped<IMaleficRepository, MaleficRepository>();
 builder.Services.AddScoped<IOtherImportantDataRepository,OtherImportantDataRepository>();
 builder.Services.AddScoped<ICalChalitRepository, CalChalitRepository>();
+builder.Services.AddScoped<IPrastharashtakvargaRepository, PrastharashtakvargaRepository>();
+builder.Services.AddScoped<IPrastharashtakvargaService, PrastharashtakvargaService>();
 
 
 
