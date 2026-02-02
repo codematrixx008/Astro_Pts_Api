@@ -226,3 +226,33 @@ BEGIN
   CREATE INDEX IX_ChatMessages_SessionCreated
     ON dbo.ChatMessages(ChatSessionId, CreatedUtc);
 END
+
+
+IF OBJECT_ID('dbo.Roles','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.Roles (
+        RoleId INT IDENTITY PRIMARY KEY,
+        Code NVARCHAR(50) NOT NULL UNIQUE,     -- consumer, astrologer, admin
+        Name NVARCHAR(100) NOT NULL,
+        IsActive BIT NOT NULL DEFAULT 1,
+        CreatedUtc DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+
+    INSERT INTO dbo.Roles(Code, Name)
+    VALUES 
+        ('consumer','Consumer'), 
+        ('astrologer','Astrologer'), 
+        ('admin','Admin');
+END
+
+IF OBJECT_ID('dbo.UserRoles','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.UserRoles (
+        UserId BIGINT NOT NULL,
+        RoleId INT NOT NULL,
+        CreatedUtc DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CreatedBy BIGINT NULL,
+        CONSTRAINT PK_UserRoles PRIMARY KEY (UserId, RoleId)
+        
+    );
+END

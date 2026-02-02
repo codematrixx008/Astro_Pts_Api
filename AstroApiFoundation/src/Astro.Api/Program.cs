@@ -56,6 +56,9 @@ builder.Services.AddScoped<IAstrologerProfileRepository, AstrologerProfileReposi
 builder.Services.AddScoped<IAstrologerAvailabilityRepository, AstrologerAvailabilityRepository>();
 builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
 builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
+builder.Services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+
+
 
 
 
@@ -262,6 +265,7 @@ app.UseWhen(
 app.UseAuthorization();
 
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapControllers();
 
 app.MapGet("/health", () =>
     Results.Ok(new

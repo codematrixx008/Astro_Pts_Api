@@ -20,13 +20,16 @@ public sealed class JwtTokenService : IJwtTokenService
         var accessExp = now.AddMinutes(_opts.AccessTokenMinutes);
         var refreshExp = now.AddDays(_opts.RefreshTokenDays);
 
+        
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new(ClaimTypes.NameIdentifier, userId.ToString()), // NEW (helps controllers)
             new("org_id", orgId.ToString()),
             new(JwtRegisteredClaimNames.Email, email),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         };
+
 
         foreach (var r in roles) claims.Add(new Claim(ClaimTypes.Role, r));
         foreach (var s in scopes) claims.Add(new Claim("scope", s));
@@ -94,7 +97,9 @@ public sealed class JwtTokenService : IJwtTokenService
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = key,
                 ValidateLifetime = false,
-                ClockSkew = TimeSpan.Zero
+                ClockSkew = TimeSpan.Zero,
+                RoleClaimType = ClaimTypes.Role,
+
             }, out _);
 
             return principal;
