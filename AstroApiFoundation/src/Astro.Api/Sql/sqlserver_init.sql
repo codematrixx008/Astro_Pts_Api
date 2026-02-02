@@ -250,14 +250,17 @@ END;
 
 -- ==========================
 -- Billing / Ledger (MVP, no external payment gateway)
+-- - Platform commission is stored with UserId = NULL
+-- - Payout requests are stored in dbo.Payouts
 -- ==========================
+
 IF OBJECT_ID(N'dbo.LedgerTransactions', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.LedgerTransactions (
         LedgerTransactionId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         ChatSessionId BIGINT NULL,
-        UserId BIGINT NOT NULL,
-        EntryType NVARCHAR(30) NOT NULL, -- consumer_debit | astrologer_credit | platform_commission
+        UserId BIGINT NULL, -- NULL = platform ledger
+        EntryType NVARCHAR(40) NOT NULL, -- consumer_debit | astrologer_credit | platform_commission | payout | payout_platform_expense
         Amount DECIMAL(12,2) NOT NULL,
         Currency NVARCHAR(10) NOT NULL,
         CreatedUtc DATETIME2(0) NOT NULL,
@@ -268,6 +271,55 @@ BEGIN
     );
 
     CREATE INDEX IX_LedgerTransactions_UserId ON dbo.LedgerTransactions(UserId, CreatedUtc DESC);
-    CREATE INDEX IX_LedgerTransactions_ChatSessionId ON dbo.LedgerTransactions(ChatSessionId);
+    CREATE INDEX IX_LedgerTransactions_Platform ON dbo.LedgerTransactions(CreatedUtc DESC) WHERE UserId IS NULL;
+    CREATE INDEX IX_LedgerTransactions_Session ON dbo.LedgerTransactions(ChatSessionId);
+END
+ELSE
+BEGIN
+    -- Upgrade: allow platform ledger entries by making UserId nullable
+    IF EXISTS (
+        SELECT 1
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.LedgerTransactions')
+          AND name = 'UserId'
+          AND is_nullable = 0
+    )
+    BEGIN
+        DECLARE @fkName NVARCHAR(200);
+        SELECT TOP 1 @fkName = fk.name
+        FROM sys.foreign_keys fk
+        JOIN sys.objects o ON o.object_id = fk.parent_object_id
+        WHERE o.name = 'LedgerTransactions';
+
+        IF @fkName IS NOT NULL
+        BEGIN
+            EXEC('ALTER TABLE dbo.LedgerTransactions DROP CONSTRAINT ' + @fkName);
+        END
+
+        ALTER TABLE dbo.LedgerTransactions ALTER COLUMN UserId BIGINT NULL;
+
+        ALTER TABLE dbo.LedgerTransactions
+            ADD CONSTRAINT FK_LedgerTransactions_User FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId);
+    END
 END;
+
+IF OBJECT_ID(N'dbo.Payouts', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.Payouts (
+        PayoutId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        AstrologerUserId BIGINT NOT NULL,
+        Amount DECIMAL(12,2) NOT NULL,
+        Currency NVARCHAR(10) NOT NULL,
+        Status NVARCHAR(20) NOT NULL, -- requested | paid | rejected
+        RequestedUtc DATETIME2(0) NOT NULL,
+        PaidUtc DATETIME2(0) NULL,
+        MetaJson NVARCHAR(MAX) NULL,
+
+        CONSTRAINT FK_Payouts_User FOREIGN KEY (AstrologerUserId) REFERENCES dbo.Users(UserId)
+    );
+
+    CREATE INDEX IX_Payouts_UserId ON dbo.Payouts(AstrologerUserId, RequestedUtc DESC);
+    CREATE INDEX IX_Payouts_Status ON dbo.Payouts(Status, RequestedUtc DESC);
+END;
+
 

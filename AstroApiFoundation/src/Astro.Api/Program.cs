@@ -90,6 +90,7 @@ builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
 
 // Billing / Ledger
 builder.Services.AddScoped<ILedgerRepository, LedgerRepository>();
+builder.Services.AddScoped<IPayoutRepository, PayoutRepository>();
 
 // =====================================================
 // Application Services

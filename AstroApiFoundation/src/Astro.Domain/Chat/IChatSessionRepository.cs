@@ -11,4 +11,7 @@ public interface IChatSessionRepository
     Task<bool> TryStartAsync(long chatSessionId, long userId, DateTime startedUtc, CancellationToken ct);
     Task<bool> TryEndAsync(long chatSessionId, long userId, DateTime endedUtc, CancellationToken ct);
     Task<bool> TryCancelAsync(long chatSessionId, long userId, DateTime canceledUtc, CancellationToken ct);
+
+    // Booking enforcement: check overlapping sessions for astrologer for active/requested/accepted sessions.
+    Task<bool> HasAstrologerOverlapAsync(long astrologerId, DateTime startUtc, DateTime endUtc, CancellationToken ct);
 }

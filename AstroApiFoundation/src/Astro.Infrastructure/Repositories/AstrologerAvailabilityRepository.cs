@@ -44,4 +44,39 @@ WHERE AvailabilityId = @AvailabilityId AND AstrologerId = @AstrologerId;";
         using var conn = _db.Create();
         await conn.ExecuteAsync(new CommandDefinition(sql, new { AvailabilityId = availabilityId, AstrologerId = astrologerId }, cancellationToken: ct));
     }
+
+    public async Task<bool> IsAvailableForRangeAsync(long astrologerId, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        // MVP rules:
+        // - start/end must be on the same UTC date (no cross-midnight bookings)
+        // - match by DayOfWeek (0=Sunday..6=Saturday) and TimeOfDay within an active slot
+        if (startUtc.Date != endUtc.Date) return false;
+
+        var day = (int)startUtc.DayOfWeek;
+        var startTime = startUtc.TimeOfDay;
+        var endTime = endUtc.TimeOfDay;
+
+        const string sql = @"
+SELECT CASE WHEN EXISTS(
+    SELECT 1
+    FROM dbo.AstrologerAvailability
+    WHERE AstrologerId = @AstrologerId
+      AND IsActive = 1
+      AND DayOfWeek = @Day
+      AND StartTime <= @StartTime
+      AND EndTime >= @EndTime
+) THEN 1 ELSE 0 END;";
+
+        using var conn = _db.Create();
+        var ok = await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, new
+        {
+            AstrologerId = astrologerId,
+            Day = day,
+            StartTime = startTime,
+            EndTime = endTime
+        }, cancellationToken: ct));
+
+        return ok == 1;
+    }
+
 }

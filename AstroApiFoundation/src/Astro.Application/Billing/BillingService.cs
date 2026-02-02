@@ -8,7 +8,8 @@ namespace Astro.Application.Billing;
 /// MVP billing/ledger. No external payment gateway.
 /// - When a chat ends, compute amount from session snapshots
 /// - Write ledger entries: consumer_debit, astrologer_credit, platform_commission
-/// Later: integrate provider (Stripe/Razorpay), plans, wallets, refunds, chargebacks.
+/// - Platform commission is stored as UserId = NULL (platform account)
+/// Later: payment provider integration (Stripe/Razorpay), prepaid wallets, refunds, plans.
 /// </summary>
 public sealed class BillingService
 {
@@ -34,10 +35,13 @@ public sealed class BillingService
 
     public async Task RecordSettlementAsync(ChatSession session, CancellationToken ct, string currency = "INR")
     {
+        // Idempotency: do not double-settle the same session
+        if (await _ledger.HasSettlementAsync(session.ChatSessionId, ct))
+            return;
+
         var est = Estimate(session, currency);
         var now = DateTime.UtcNow;
 
-        // Consumer debit (negative balance if you don't implement pre-paid wallet yet)
         await _ledger.CreateAsync(new LedgerTransaction(
             LedgerTransactionId: 0,
             ChatSessionId: session.ChatSessionId,
@@ -49,7 +53,6 @@ public sealed class BillingService
             MetaJson: JsonSerializer.Serialize(new { minutes = (session.ScheduledEndUtc - session.ScheduledStartUtc).TotalMinutes, ppm = session.PricePerMinuteSnapshot })
         ), ct);
 
-        // Astrologer credit
         await _ledger.CreateAsync(new LedgerTransaction(
             LedgerTransactionId: 0,
             ChatSessionId: session.ChatSessionId,
@@ -61,13 +64,10 @@ public sealed class BillingService
             MetaJson: JsonSerializer.Serialize(new { sharePct = session.AstrologerSharePctSnapshot })
         ), ct);
 
-        // Platform commission (store against a synthetic platform user 0? We'll store UserId=session.AstrologerId? No.
-        // MVP approach: store platform commission under UserId=0 is not possible due to FK. So we store under ConsumerId with entryType=platform_commission.
-        // Later: introduce PlatformAccounts table.
         await _ledger.CreateAsync(new LedgerTransaction(
             LedgerTransactionId: 0,
             ChatSessionId: session.ChatSessionId,
-            UserId: session.ConsumerId,
+            UserId: null, // platform account
             EntryType: "platform_commission",
             Amount: est.PlatformCommission,
             Currency: est.Currency,

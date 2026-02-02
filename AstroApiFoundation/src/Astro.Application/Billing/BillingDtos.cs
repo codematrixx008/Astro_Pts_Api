@@ -7,3 +7,9 @@ public sealed record BillingEstimateResponse(
     decimal PlatformCommission,
     decimal AstrologerEarnings
 );
+
+public sealed record PayoutRequest(
+    decimal Amount,
+    string Currency,
+    string? Notes
+);

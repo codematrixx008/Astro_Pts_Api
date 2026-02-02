@@ -40,7 +40,7 @@ public sealed class ChatHub : Hub
         if (!await _sessions.IsParticipantAsync(chatSessionId, userId, ct))
             throw new HubException("not_a_participant");
 
-        // Optional: allow messaging only when session accepted/active
+        // Enforce messaging only for accepted/active sessions
         var session = await _sessions.GetByIdAsync(chatSessionId, ct);
         if (session is null) throw new HubException("session_not_found");
         if (session.Status is not ("accepted" or "active"))

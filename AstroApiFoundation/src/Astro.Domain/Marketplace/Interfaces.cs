@@ -13,4 +13,7 @@ public interface IAstrologerAvailabilityRepository
     Task<IReadOnlyList<AstrologerAvailability>> GetByAstrologerAsync(long astrologerId, CancellationToken ct);
     Task AddAsync(AstrologerAvailability slot, CancellationToken ct);
     Task DisableAsync(long availabilityId, long astrologerId, CancellationToken ct);
+
+    // Booking validation (MVP): checks if the requested UTC time range fits an active availability slot.
+    Task<bool> IsAvailableForRangeAsync(long astrologerId, DateTime startUtc, DateTime endUtc, CancellationToken ct);
 }

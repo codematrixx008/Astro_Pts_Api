@@ -149,4 +149,28 @@ WHERE ChatSessionId = @ChatSessionId
         }, cancellationToken: ct));
         return rows == 1;
     }
+
+    public async Task<bool> HasAstrologerOverlapAsync(long astrologerId, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        // overlap rule: start < existingEnd AND end > existingStart
+        const string sql = @"
+SELECT CASE WHEN EXISTS(
+    SELECT 1
+    FROM dbo.ChatSessions
+    WHERE AstrologerId = @AstrologerId
+      AND Status IN ('requested','accepted','active')
+      AND @StartUtc < ScheduledEndUtc
+      AND @EndUtc > ScheduledStartUtc
+) THEN 1 ELSE 0 END;";
+        using var conn = _db.Create();
+        var ok = await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new
+            {
+                AstrologerId = astrologerId,
+                StartUtc = startUtc,
+                EndUtc = endUtc
+            }, cancellationToken: ct));
+        return ok == 1;
+    }
+
 }
