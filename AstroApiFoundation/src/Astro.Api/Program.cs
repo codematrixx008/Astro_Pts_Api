@@ -22,6 +22,7 @@ using Microsoft.OpenApi.Models;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -150,13 +151,27 @@ builder.Services
         };
     });
 
+//builder.Services.AddAuthorization(options =>
+//{
+//    options.AddPolicy(ScopePolicies.EphemerisRead, p =>
+//        p.Requirements.Add(new ScopeRequirement("ephemeris.read")));
+//});
+
+//builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopeAuthorizationHandler>();
+
+
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy(ScopePolicies.EphemerisRead, p =>
-        p.Requirements.Add(new ScopeRequirement("ephemeris.read")));
+    options.AddPolicy(
+        ScopePolicies.EphemerisRead,
+        policy => policy.Requirements.Add(
+            new ScopeRequirement(ScopePolicies.EphemerisRead)
+        )
+    );
 });
 
-builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopeAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, ScopeAuthorizationHandler>();
+
 
 // =====================================================
 // Rate limiting (partition by API key id)
@@ -210,13 +225,16 @@ builder.Services.AddSwaggerGen(c =>
         Description = "API key header. Format: <prefix>.<secret>"
     });
 
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    /*c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
             new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
             Array.Empty<string>()
         }
-    });
+    });*/
+
+    c.OperationFilter<Astro.Api.Swagger.SecurityRequirementsOperationFilter>();
+
 });
 
 var app = builder.Build();

@@ -13,9 +13,9 @@ public sealed class ApiKeyAuthMiddleware
     public async Task InvokeAsync(
         HttpContext context,
         IApiKeyRepository apiKeys,
-        Pbkdf2Hasher hasher,
-        CancellationToken ct)
+        Pbkdf2Hasher hasher)
     {
+        var ct = context.RequestAborted;
         // If already authenticated (JWT) we still allow, but public API is intended for API keys.
         // You can change this behavior later.
         if (!context.Request.Headers.TryGetValue("X-Api-Key", out var headerValue))
@@ -64,7 +64,11 @@ public sealed class ApiKeyAuthMiddleware
             new Claim("org_id", apiKey.OrgId.ToString()),
             new Claim(ClaimTypes.NameIdentifier, $"apikey:{apiKey.ApiKeyId}")
         };
-        foreach (var s in scopes) claims.Add(new Claim("scope", s));
+
+        foreach (var scope in scopes)
+        {
+            claims.Add(new Claim("scope", scope));
+        }
 
         var identity = new ClaimsIdentity(claims, authenticationType: "ApiKey");
         context.User = new ClaimsPrincipal(identity);
