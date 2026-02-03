@@ -19,8 +19,12 @@ public sealed class RefreshTokenHasher
 
     public string Hash(string refreshTokenPlain)
     {
+        if (string.IsNullOrWhiteSpace(refreshTokenPlain))
+            return string.Empty;
+
         using var h = new HMACSHA256(_key);
         var bytes = h.ComputeHash(Encoding.UTF8.GetBytes(refreshTokenPlain));
         return Convert.ToBase64String(bytes);
     }
+
 }

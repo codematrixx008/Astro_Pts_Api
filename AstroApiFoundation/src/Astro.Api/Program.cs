@@ -49,12 +49,16 @@ builder.Services.AddSingleton(sp =>
 });
 
 // CORS for React UI (cookie auth needs AllowCredentials)
-var uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:5173";
+//var uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:3000";
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ui", policy =>
     {
-        policy.WithOrigins(uiOrigin)
+        policy.WithOrigins(
+              "http://localhost:5173",
+              "http://localhost:3000"
+        )
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -227,11 +231,12 @@ using (var scope = app.Services.CreateScope())
 app.UseSwagger();
 app.UseSwaggerUI();
 
+app.UseRouting();
 app.UseCors("ui");
 
 app.UseCookiePolicy(new CookiePolicyOptions
 {
-    MinimumSameSitePolicy = SameSiteMode.Lax
+    MinimumSameSitePolicy = SameSiteMode.None
 });
 
 app.UseHttpsRedirection();

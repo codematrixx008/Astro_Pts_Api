@@ -1,5 +1,6 @@
+﻿using Astro.Api.Security;
 using Astro.Application.Auth;
-using Astro.Api.Security;
+using Astro.Application.Security;
 using Astro.Domain.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,15 +15,31 @@ namespace Astro.Api.Controllers;
 public sealed class AuthController : ControllerBase
 {
     private readonly AuthService _auth;
-    private readonly JwtTokenService _jwt; // concrete for expired-token parsing
     private readonly IUserRoleRepository _roles;
+
+    // NEW: repos needed for cookie-only refresh
+    private readonly IUserSessionRepository _sessions;                 // ✅ NEW
+    private readonly IUserRepository _users;                           // ✅ NEW
+    private readonly IUserOrganizationRepository _userOrgs;            // ✅ NEW
+    private readonly RefreshTokenHasher _refreshHasher;                // ✅ NEW
+
     private readonly AuthCookieOptions _cookie;
 
-    public AuthController(AuthService auth, IJwtTokenService jwt, IUserRoleRepository roles, IOptions<AuthCookieOptions> cookie)
+    public AuthController(
+        AuthService auth,
+        IUserRoleRepository roles,
+        IUserSessionRepository sessions,                 // ✅ NEW
+        IUserRepository users,                           // ✅ NEW
+        IUserOrganizationRepository userOrgs,            // ✅ NEW
+        RefreshTokenHasher refreshHasher,                // ✅ NEW
+        IOptions<AuthCookieOptions> cookie)
     {
         _auth = auth;
-        _jwt = (JwtTokenService)jwt;
         _roles = roles;
+        _sessions = sessions;
+        _users = users;
+        _userOrgs = userOrgs;
+        _refreshHasher = refreshHasher;
         _cookie = cookie.Value;
     }
 
@@ -48,39 +65,76 @@ public sealed class AuthController : ControllerBase
         return Ok(tokens);
     }
 
+    // ✅ UPDATED: cookie-only refresh (no Bearer needed)
     [HttpPost("refresh")]
     public async Task<ActionResult<AuthTokens>> Refresh(CancellationToken ct)
     {
-        if (!Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) || string.IsNullOrWhiteSpace(refreshPlain))
+        if (!Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) ||
+            string.IsNullOrWhiteSpace(refreshPlain))
+        {
             return Unauthorized(new { error = "missing_refresh_cookie" });
+        }
 
-        // Require (possibly expired) access token to identify user + org
-        var bearer = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(bearer) || !bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return Unauthorized(new { error = "missing_bearer_token" });
+        try
+        {
+            var now = DateTime.UtcNow;
 
-        var accessToken = bearer["Bearer ".Length..].Trim();
-        var principal = _jwt.GetPrincipalFromExpiredToken(accessToken);
-        if (principal is null)
-            return Unauthorized(new { error = "invalid_bearer_token" });
+            // 1) Lookup session by refresh token hash
+            var hash = _refreshHasher.Hash(refreshPlain);
+            var session = await _sessions.GetByRefreshTokenHashAsync(hash, ct);
 
-        var userId = long.Parse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
-        var orgId = long.Parse(principal.FindFirstValue("org_id")!);
-        var email = principal.FindFirstValue(JwtRegisteredClaimNames.Email) ?? "";
+            if (session is null)
+                return Unauthorized(new { error = "invalid_refresh_cookie" });
 
-        var ua = Request.Headers.UserAgent.ToString();
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (session.RevokedUtc is not null)
+                return Unauthorized(new { error = "refresh_revoked" });
 
-        var (tokens, newRefresh) = await _auth.RefreshAsync(userId, orgId, email, refreshPlain, ua, ip, ct);
-        SetRefreshCookie(newRefresh, tokens.RefreshTokenExpiresUtc);
-        return Ok(tokens);
+            if (session.ExpiresUtc <= now)
+                return Unauthorized(new { error = "refresh_expired" });
+
+            // 2) Load user
+            var user = await _users.GetByIdAsync(session.UserId, ct);
+            if (user is null || !user.IsActive)
+                return Unauthorized(new { error = "user_inactive" });
+
+            // 3) Load primary org
+            var orgList = await _userOrgs.GetForUserAsync(user.UserId, ct);
+            var orgId = orgList.FirstOrDefault()?.OrgId;
+
+            if (orgId is null)
+                return Unauthorized(new { error = "no_org_assigned" });
+
+            // 4) Rotate via AuthService (keeps your rotation logic)
+            var ua = Request.Headers.UserAgent.ToString();
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            var (tokens, newRefresh) = await _auth.RefreshAsync(
+                userId: user.UserId,
+                orgId: orgId.Value,
+                email: user.Email,
+                refreshTokenPlain: refreshPlain,
+                userAgent: ua,
+                ip: ip,
+                ct: ct);
+
+            SetRefreshCookie(newRefresh, tokens.RefreshTokenExpiresUtc);
+            return Ok(tokens);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // AuthService throws these for invalid tokens; map to 401 instead of 500
+            return Unauthorized(new { error = "invalid_refresh_cookie" });
+        }
     }
 
     [HttpPost("logout")]
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
-        if (Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) && !string.IsNullOrWhiteSpace(refreshPlain))
+        if (Request.Cookies.TryGetValue(_cookie.RefreshCookieName, out var refreshPlain) &&
+            !string.IsNullOrWhiteSpace(refreshPlain))
+        {
             await _auth.LogoutAsync(refreshPlain, ct);
+        }
 
         DeleteRefreshCookie();
         return Ok(new { ok = true });
