@@ -23,6 +23,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
+using Astro.Domain.Consumers;
 
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 var builder = WebApplication.CreateBuilder(args);
@@ -126,6 +127,9 @@ builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
 // Billing / Ledger
 builder.Services.AddScoped<ILedgerRepository, LedgerRepository>();
 builder.Services.AddScoped<IPayoutRepository, PayoutRepository>();
+
+//Cosumer
+builder.Services.AddScoped<IConsumerProfileRepository, ConsumerProfileRepository>();
 
 // =====================================================
 // Application Services
