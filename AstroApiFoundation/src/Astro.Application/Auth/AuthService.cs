@@ -61,6 +61,8 @@ public sealed class AuthService
         await _roles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
 
         var roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
+
+        // //update: Option 1 => JWT scopes empty (Public API uses API keys)
         var (tokens, refreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
 
         var now = _clock.UtcNow;
@@ -107,6 +109,7 @@ public sealed class AuthService
             roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
         }
 
+        // //update: Option 1 => JWT scopes empty
         var (tokens, refreshPlain) = _jwt.CreateTokens(user.UserId, primaryOrgId, user.Email, roleCodes, Array.Empty<string>());
 
         var now = _clock.UtcNow;
@@ -159,6 +162,7 @@ public sealed class AuthService
             roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
         }
 
+        // //update: Option 1 => JWT scopes empty
         var (tokens, newRefreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
         var newHash = _refreshHasher.Hash(newRefreshPlain);
 
@@ -174,5 +178,77 @@ public sealed class AuthService
         if (session is null) return;
 
         await _sessions.RevokeAsync(session.SessionId, _clock.UtcNow, ct);
+    }
+
+    // ===========================
+    // //update: Mobile endpoints
+    // ===========================
+
+    public sealed record MobileAuthResult(AuthTokens Tokens, string RefreshTokenPlain);
+
+    public async Task<MobileAuthResult> RegisterMobileAsync(
+        RegisterRequest req,
+        string? userAgent,
+        string? ip,
+        CancellationToken ct)
+    {
+        var (_, _, tokens, refreshPlain) = await RegisterAsync(req, userAgent, ip, ct);
+        return new MobileAuthResult(tokens, refreshPlain);
+    }
+
+    public async Task<MobileAuthResult> LoginMobileAsync(
+        LoginRequest req,
+        string? userAgent,
+        string? ip,
+        CancellationToken ct)
+    {
+        var (tokens, refreshPlain) = await LoginAsync(req, userAgent, ip, ct);
+        return new MobileAuthResult(tokens, refreshPlain);
+    }
+
+    // Cookie-less refresh for mobile: identify user from session, not Bearer claims
+    public async Task<MobileAuthResult> RefreshMobileAsync(
+        string refreshTokenPlain,
+        string? userAgent,
+        string? ip,
+        CancellationToken ct)
+    {
+        var now = _clock.UtcNow;
+
+        var oldHash = _refreshHasher.Hash(refreshTokenPlain);
+        var session = await _sessions.GetByRefreshTokenHashAsync(oldHash, ct)
+            ?? throw new UnauthorizedAccessException("Invalid refresh token.");
+
+        if (session.RevokedUtc is not null)
+            throw new UnauthorizedAccessException("Refresh token revoked.");
+
+        if (session.ExpiresUtc <= now)
+            throw new UnauthorizedAccessException("Refresh token expired.");
+
+        var user = await _users.GetByIdAsync(session.UserId, ct)
+            ?? throw new UnauthorizedAccessException("User not found.");
+
+        if (!user.IsActive)
+            throw new UnauthorizedAccessException("User inactive.");
+
+        var orgList = await _userOrgs.GetForUserAsync(user.UserId, ct);
+        var orgId = orgList.FirstOrDefault()?.OrgId
+            ?? throw new UnauthorizedAccessException("No organization assigned.");
+
+        var roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
+        if (roleCodes.Count == 0)
+        {
+            await _roles.EnsureUserHasRoleAsync(user.UserId, "consumer", createdBy: user.UserId, ct);
+            roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
+        }
+
+        // //update: Option 1 => JWT scopes empty
+        var (tokens, newRefreshPlain) = _jwt.CreateTokens(
+            user.UserId, orgId, user.Email, roleCodes, Array.Empty<string>());
+
+        var newHash = _refreshHasher.Hash(newRefreshPlain);
+        await _sessions.RotateAsync(session.SessionId, newHash, tokens.RefreshTokenExpiresUtc, now, ct);
+
+        return new MobileAuthResult(tokens, newRefreshPlain);
     }
 }

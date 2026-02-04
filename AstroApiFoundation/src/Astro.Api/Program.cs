@@ -24,6 +24,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 
+var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 var builder = WebApplication.CreateBuilder(args);
 
 // =====================================================
@@ -52,17 +53,46 @@ builder.Services.AddSingleton(sp =>
 // CORS for React UI (cookie auth needs AllowCredentials)
 //var uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:3000";
 
+//builder.Services.AddCors(options =>
+//{
+//    options.AddPolicy("ui", policy =>
+//    {
+//        policy.WithOrigins(
+//              "http://localhost:5173",
+//              "http://localhost:3000"
+//        )
+//              .AllowAnyHeader()
+//              .AllowAnyMethod()
+//              .AllowCredentials();
+//    });
+//});
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("ui", policy =>
+    options.AddPolicy(MyAllowSpecificOrigins, policy =>
     {
-        policy.WithOrigins(
-              "http://localhost:5173",
-              "http://localhost:3000"
-        )
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrWhiteSpace(origin))
+                    return false;
+
+                try
+                {
+                    var uri = new Uri(origin);
+
+                    return uri.Host.StartsWith("192.168.")
+                           || uri.Host == "localhost"
+                           || uri.Host == "103.119.198.238";
+                }
+                catch
+                {
+                    return false;
+                }
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -151,15 +181,6 @@ builder.Services
         };
     });
 
-//builder.Services.AddAuthorization(options =>
-//{
-//    options.AddPolicy(ScopePolicies.EphemerisRead, p =>
-//        p.Requirements.Add(new ScopeRequirement("ephemeris.read")));
-//});
-
-//builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopeAuthorizationHandler>();
-
-
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(
@@ -225,14 +246,6 @@ builder.Services.AddSwaggerGen(c =>
         Description = "API key header. Format: <prefix>.<secret>"
     });
 
-    /*c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
-            Array.Empty<string>()
-        }
-    });*/
-
     c.OperationFilter<Astro.Api.Swagger.SecurityRequirementsOperationFilter>();
 
 });
@@ -250,7 +263,7 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseRouting();
-app.UseCors("ui");
+app.UseCors(MyAllowSpecificOrigins);
 
 app.UseCookiePolicy(new CookiePolicyOptions
 {
