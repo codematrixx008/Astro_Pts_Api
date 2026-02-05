@@ -8,7 +8,8 @@ public sealed class ApiKeyAuthMiddleware
 {
     private readonly RequestDelegate _next;
 
-    public ApiKeyAuthMiddleware(RequestDelegate next) => _next = next;
+    public ApiKeyAuthMiddleware(RequestDelegate next)
+        => _next = next;
 
     public async Task InvokeAsync(
         HttpContext context,
@@ -16,21 +17,24 @@ public sealed class ApiKeyAuthMiddleware
         Pbkdf2Hasher hasher)
     {
         var ct = context.RequestAborted;
-        // If already authenticated (JWT) we still allow, but public API is intended for API keys.
-        // You can change this behavior later.
+
+        // Require API key
         if (!context.Request.Headers.TryGetValue("X-Api-Key", out var headerValue))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new { error = "missing_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(
+                new { error = "missing_api_key" }, ct);
             return;
         }
 
         var raw = headerValue.ToString().Trim();
         var parts = raw.Split('.', 2);
+
         if (parts.Length != 2)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key_format" }, ct);
+            await context.Response.WriteAsJsonAsync(
+                new { error = "invalid_api_key_format" }, ct);
             return;
         }
 
@@ -41,23 +45,26 @@ public sealed class ApiKeyAuthMiddleware
         if (apiKey is null || !apiKey.IsActive || apiKey.RevokedUtc is not null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(
+                new { error = "invalid_api_key" }, ct);
             return;
         }
 
         if (!hasher.Verify(secret, apiKey.SecretHash))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new { error = "invalid_api_key" }, ct);
+            await context.Response.WriteAsJsonAsync(
+                new { error = "invalid_api_key" }, ct);
             return;
         }
 
         var scopes = (apiKey.ScopesCsv ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        context.SetApiKeyContext(new ApiKeyContext(apiKey.ApiKeyId, apiKey.OrgId, scopes, apiKey.Prefix, apiKey.DailyQuota, apiKey.PlanCode));
+        context.SetApiKeyContext(
+            new ApiKeyContext(apiKey.ApiKeyId, apiKey.OrgId, scopes, apiKey.Prefix));
 
-        // Set principal for authorization policies
+        // Build ClaimsPrincipal for [Authorize]
         var claims = new List<Claim>
         {
             new Claim("api_key_id", apiKey.ApiKeyId.ToString()),
@@ -66,9 +73,7 @@ public sealed class ApiKeyAuthMiddleware
         };
 
         foreach (var scope in scopes)
-        {
             claims.Add(new Claim("scope", scope));
-        }
 
         var identity = new ClaimsIdentity(claims, authenticationType: "ApiKey");
         context.User = new ClaimsPrincipal(identity);
