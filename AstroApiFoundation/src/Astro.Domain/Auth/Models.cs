@@ -41,7 +41,9 @@ public sealed record ApiKey(
     bool IsActive,
     DateTime CreatedUtc,
     DateTime? LastUsedUtc,
-    DateTime? RevokedUtc
+    DateTime? RevokedUtc,
+    int? DailyQuota,
+    string? PlanCode
 );
 
 public sealed record ApiUsageLog(

@@ -28,7 +28,7 @@ public interface IRefreshTokenRepository
 
 public interface IApiKeyRepository
 {
-    Task<long> CreateAsync(long orgId, string name, string prefix, string secretHash, string scopesCsv, CancellationToken ct);
+    Task<long> CreateAsync(long orgId, string name, string prefix, string secretHash, string scopesCsv, int? dailyQuota, string? planCode, CancellationToken ct);
     Task<IReadOnlyList<ApiKey>> ListAsync(long orgId, CancellationToken ct);
     Task<ApiKey?> GetActiveByPrefixAsync(string prefix, CancellationToken ct);
     Task RevokeAsync(long apiKeyId, DateTime revokedUtc, CancellationToken ct);
