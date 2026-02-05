@@ -13,11 +13,12 @@ public sealed record LoginRequest(
 
 public sealed record AuthTokens(
     string AccessToken,
-    string RefreshToken,
     DateTime AccessTokenExpiresUtc,
     DateTime RefreshTokenExpiresUtc
 );
 
+// Cookie-based refresh: refresh token is stored in HttpOnly cookie.
+// This request is kept for forward compatibility (e.g., mobile clients) but is unused by the web flow.
 public sealed record RefreshRequest(
-    string RefreshToken
+    string? RefreshToken
 );
