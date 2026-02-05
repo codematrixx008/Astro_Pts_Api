@@ -24,10 +24,23 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Astro.Domain.Consumers;
+using Astro.Domain.Interface;
+using System.Data;
+using Microsoft.Data.SqlClient;
 
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 var builder = WebApplication.CreateBuilder(args);
 
+
+//======================================================
+//IDB Connection
+//======================================================
+builder.Services.AddScoped<IDbConnection>(sp =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+    return new SqlConnection(connectionString);
+});
 // =====================================================
 // Configuration
 // =====================================================
@@ -113,8 +126,6 @@ builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
 // API key product + usage
 builder.Services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
-builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>();
-builder.Services.AddScoped<IApiUsageCounterRepository, ApiUsageCounterRepository>();
 
 // Marketplace
 builder.Services.AddScoped<IAstrologerProfileRepository, AstrologerProfileRepository>();
@@ -123,6 +134,18 @@ builder.Services.AddScoped<IAstrologerAvailabilityRepository, AstrologerAvailabi
 // Chat
 builder.Services.AddScoped<IChatSessionRepository, ChatSessionRepository>();
 builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
+
+builder.Services.AddScoped<IApiUsageLogRepository, ApiUsageLogRepository>(); 
+builder.Services.AddScoped<IFavourablePointRepository, FavourablePointRepository>();
+builder.Services.AddScoped<IPersonalDetailRepository, PersonalDetailRepository>();
+builder.Services.AddScoped<IAvkahadaChakraRepository, AvkahadaChakraRepository>();
+builder.Services.AddScoped<IMaleficRepository, MaleficRepository>();
+builder.Services.AddScoped<IOtherImportantDataRepository,OtherImportantDataRepository>();
+builder.Services.AddScoped<ICalChalitRepository, CalChalitRepository>();
+builder.Services.AddScoped<IPrastharashtakvargaRepository, PrastharashtakvargaRepository>();
+builder.Services.AddScoped<IPrastharashtakvargaService, PrastharashtakvargaService>();
+
+
 
 // Billing / Ledger
 builder.Services.AddScoped<ILedgerRepository, LedgerRepository>();
