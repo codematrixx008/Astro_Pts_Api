@@ -2,7 +2,6 @@ using Astro.Application.Ephemeris;
 using Astro.Api.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Astro.Application.Common;
 
 namespace Astro.Api.Controllers;
 
@@ -17,16 +16,11 @@ public sealed class EphemerisController : ControllerBase
     [HttpGet("planet-positions")]
     [Authorize(Policy = ScopePolicies.EphemerisRead)]
     public async Task<ActionResult<PlanetPositionResponse>> GetPlanetPositions(
-        [FromQuery] string datetimeUtc,
+        [FromQuery] DateTime? datetimeUtc,
         CancellationToken ct)
     {
-        if (!DateTimeOffset.TryParse(datetimeUtc, out var dto))
-            return BadRequest("Invalid datetimeUtc. Use ISO8601 UTC like 2026-01-30T00:00:00Z.");
-
-        var dt = dto.UtcDateTime;
-        Validation.EnsureUtcAndRange(dt);
-
-        var resp = await _ephemeris.GetPlanetPositionsAsync(new PlanetPositionRequest(dt), ct);
+        var input = datetimeUtc?.ToUniversalTime() ?? DateTime.UtcNow;
+        var resp = await _ephemeris.GetPlanetPositionsAsync(new PlanetPositionRequest(input), ct);
         return Ok(resp);
     }
 }

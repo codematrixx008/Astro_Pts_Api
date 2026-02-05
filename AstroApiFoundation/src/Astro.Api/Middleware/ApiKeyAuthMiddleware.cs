@@ -62,7 +62,7 @@ public sealed class ApiKeyAuthMiddleware
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         context.SetApiKeyContext(
-            new ApiKeyContext(apiKey.ApiKeyId, apiKey.OrgId, scopes, apiKey.Prefix,apiKey.DailyQuota,apiKey.PlanCode));
+            new ApiKeyContext(apiKey.ApiKeyId, apiKey.OrgId, scopes, apiKey.Prefix));
 
         // Build ClaimsPrincipal for [Authorize]
         var claims = new List<Claim>

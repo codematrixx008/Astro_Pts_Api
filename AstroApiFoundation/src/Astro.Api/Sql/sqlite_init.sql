@@ -69,15 +69,3 @@ ON ApiUsageLogs(ApiKeyId);
 CREATE INDEX IF NOT EXISTS IX_ApiUsageLogs_UserId
 ON ApiUsageLogs(UserId);
 
-CREATE TABLE IF NOT EXISTS ApiUsageCounters (
-    ApiKeyId      INTEGER NOT NULL,
-    DateUtc       TEXT NOT NULL,     -- YYYY-MM-DD (UTC)
-    RequestCount  INTEGER NOT NULL,
-    PRIMARY KEY (ApiKeyId, DateUtc)
-);
-
-CREATE INDEX IF NOT EXISTS IX_ApiUsageCounters_DateUtc
-ON ApiUsageCounters (DateUtc);
-
-
-
