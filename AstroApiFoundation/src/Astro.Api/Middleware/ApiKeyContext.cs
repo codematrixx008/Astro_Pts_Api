@@ -4,7 +4,5 @@ public sealed record ApiKeyContext(
     long ApiKeyId,
     long OrgId,
     IReadOnlyList<string> Scopes,
-    string Prefix,
-    int? DailyQuota,
-    string? PlanCode
+    string Prefix
 );

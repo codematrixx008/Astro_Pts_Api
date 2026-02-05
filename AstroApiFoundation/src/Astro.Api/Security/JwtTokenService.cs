@@ -14,12 +14,7 @@ public sealed class JwtTokenService : IJwtTokenService
 
     public JwtTokenService(IOptions<JwtOptions> opts) => _opts = opts.Value;
 
-    public (AuthTokens tokens, string refreshTokenPlain) CreateTokens(
-        long userId,
-        long orgId,
-        string email,
-        IReadOnlyList<string> roles,
-        IReadOnlyList<string> scopes)
+    public AuthTokens CreateTokens(long userId, long orgId, string email, IReadOnlyList<string> roles, IReadOnlyList<string> scopes)
     {
         var now = DateTime.UtcNow;
         var accessExp = now.AddMinutes(_opts.AccessTokenMinutes);
@@ -28,7 +23,6 @@ public sealed class JwtTokenService : IJwtTokenService
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),
-            new(ClaimTypes.NameIdentifier, userId.ToString()),
             new("org_id", orgId.ToString()),
             new(JwtRegisteredClaimNames.Email, email),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
@@ -50,10 +44,10 @@ public sealed class JwtTokenService : IJwtTokenService
 
         var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
 
-        // refresh token is opaque secret (stored only in HttpOnly cookie)
+        // refresh token is opaque secret
         var refreshToken = TokenGenerator.CreateSecret(48);
 
-        return (new AuthTokens(accessToken, accessExp, refreshExp), refreshToken);
+        return new AuthTokens(accessToken, refreshToken, accessExp, refreshExp);
     }
 
     public ClaimsPrincipal? ValidateAccessToken(string token)
@@ -72,9 +66,7 @@ public sealed class JwtTokenService : IJwtTokenService
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = key,
                 ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromSeconds(30),
-                RoleClaimType = ClaimTypes.Role,
-                NameClaimType = ClaimTypes.NameIdentifier
+                ClockSkew = TimeSpan.FromSeconds(30)
             }, out _);
 
             return principal;
@@ -101,9 +93,7 @@ public sealed class JwtTokenService : IJwtTokenService
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = key,
                 ValidateLifetime = false,
-                ClockSkew = TimeSpan.Zero,
-                RoleClaimType = ClaimTypes.Role,
-                NameClaimType = ClaimTypes.NameIdentifier
+                ClockSkew = TimeSpan.Zero
             }, out _);
 
             return principal;
