@@ -9,246 +9,101 @@ public sealed class AuthService
     private readonly IUserRepository _users;
     private readonly IOrganizationRepository _orgs;
     private readonly IUserOrganizationRepository _userOrgs;
-
-    private readonly IUserRoleRepository _roles;
-    private readonly IUserSessionRepository _sessions;
-
+    private readonly IRefreshTokenRepository _refreshTokens;
     private readonly IJwtTokenService _jwt;
-    private readonly Pbkdf2Hasher _passwordHasher;
-    private readonly RefreshTokenHasher _refreshHasher;
+    private readonly Pbkdf2Hasher _hasher;
     private readonly IClock _clock;
 
     public AuthService(
         IUserRepository users,
         IOrganizationRepository orgs,
         IUserOrganizationRepository userOrgs,
-        IUserRoleRepository roles,
-        IUserSessionRepository sessions,
+        IRefreshTokenRepository refreshTokens,
         IJwtTokenService jwt,
-        Pbkdf2Hasher passwordHasher,
-        RefreshTokenHasher refreshHasher,
+        Pbkdf2Hasher hasher,
         IClock clock)
     {
         _users = users;
         _orgs = orgs;
         _userOrgs = userOrgs;
-        _roles = roles;
-        _sessions = sessions;
+        _refreshTokens = refreshTokens;
         _jwt = jwt;
-        _passwordHasher = passwordHasher;
-        _refreshHasher = refreshHasher;
+        _hasher = hasher;
         _clock = clock;
     }
 
-    public async Task<(long userId, long orgId, AuthTokens tokens, string refreshTokenPlain)> RegisterAsync(
-        RegisterRequest req,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
+    public async Task<(long userId, long orgId, AuthTokens tokens)> RegisterAsync(RegisterRequest req, CancellationToken ct)
     {
         var email = req.Email.Trim().ToLowerInvariant();
 
         var existing = await _users.GetByEmailAsync(email, ct);
         if (existing is not null) throw new InvalidOperationException("User already exists.");
 
-        var pwdHash = _passwordHasher.Hash(req.Password);
+        var pwdHash = _hasher.Hash(req.Password);
         var userId = await _users.CreateAsync(email, pwdHash, ct);
 
         var orgId = await _orgs.CreateAsync(req.OrganizationName.Trim(), ct);
         await _userOrgs.AddOwnerAsync(userId, orgId, ct);
 
-        // Default onboarding role for everyone
-        await _roles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
+        var roles = new[] { "Owner" };
+        var scopes = Array.Empty<string>(); // JWT scopes for portal, not public API
 
-        var roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
+        var tokens = _jwt.CreateTokens(userId, orgId, email, roles, scopes);
 
-        // //update: Option 1 => JWT scopes empty (Public API uses API keys)
-        var (tokens, refreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
+        // Store refresh token (hashed) for rotation
+        var refreshHash = _hasher.Hash(tokens.RefreshToken);
+        await _refreshTokens.CreateAsync(userId, refreshHash, tokens.RefreshTokenExpiresUtc, ct);
 
-        var now = _clock.UtcNow;
-        var refreshHash = _refreshHasher.Hash(refreshPlain);
-
-        await _sessions.CreateAsync(new UserSession(
-            SessionId: 0,
-            UserId: userId,
-            RefreshTokenHash: refreshHash,
-            ExpiresUtc: tokens.RefreshTokenExpiresUtc,
-            CreatedUtc: now,
-            RevokedUtc: null,
-            ReplacedByTokenHash: null,
-            UserAgent: userAgent,
-            IpAddress: ip
-        ), ct);
-
-        return (userId, orgId, tokens, refreshPlain);
+        // Return plaintext refresh to client only once
+        return (userId, orgId, tokens);
     }
 
-    public async Task<(AuthTokens tokens, string refreshTokenPlain)> LoginAsync(
-        LoginRequest req,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
+    public async Task<AuthTokens> LoginAsync(LoginRequest req, CancellationToken ct)
     {
         var email = req.Email.Trim().ToLowerInvariant();
-        var user = await _users.GetByEmailAsync(email, ct)
-            ?? throw new UnauthorizedAccessException("Invalid credentials.");
+        var user = await _users.GetByEmailAsync(email, ct) ?? throw new UnauthorizedAccessException("Invalid credentials.");
 
         if (!user.IsActive) throw new UnauthorizedAccessException("User inactive.");
 
-        if (!_passwordHasher.Verify(req.Password, user.PasswordHash))
+        if (!_hasher.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid credentials.");
 
         var userOrgList = await _userOrgs.GetForUserAsync(user.UserId, ct);
         var primaryOrgId = userOrgList.FirstOrDefault()?.OrgId
             ?? throw new UnauthorizedAccessException("No organization assigned.");
 
-        var roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
-        if (roleCodes.Count == 0)
-        {
-            await _roles.EnsureUserHasRoleAsync(user.UserId, "consumer", createdBy: user.UserId, ct);
-            roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
-        }
+        var role = userOrgList.First(x => x.OrgId == primaryOrgId).Role;
 
-        // //update: Option 1 => JWT scopes empty
-        var (tokens, refreshPlain) = _jwt.CreateTokens(user.UserId, primaryOrgId, user.Email, roleCodes, Array.Empty<string>());
+        var tokens = _jwt.CreateTokens(user.UserId, primaryOrgId, user.Email, new[] { role }, Array.Empty<string>());
 
-        var now = _clock.UtcNow;
-        var refreshHash = _refreshHasher.Hash(refreshPlain);
+        // Store refresh token (hashed)
+        var refreshHash = _hasher.Hash(tokens.RefreshToken);
+        await _refreshTokens.CreateAsync(user.UserId, refreshHash, tokens.RefreshTokenExpiresUtc, ct);
 
-        await _sessions.CreateAsync(new UserSession(
-            SessionId: 0,
-            UserId: user.UserId,
-            RefreshTokenHash: refreshHash,
-            ExpiresUtc: tokens.RefreshTokenExpiresUtc,
-            CreatedUtc: now,
-            RevokedUtc: null,
-            ReplacedByTokenHash: null,
-            UserAgent: userAgent,
-            IpAddress: ip
-        ), ct);
-
-        return (tokens, refreshPlain);
+        return tokens;
     }
 
-    public async Task<(AuthTokens tokens, string refreshTokenPlain)> RefreshAsync(
-        long userId,
-        long orgId,
-        string email,
-        string refreshTokenPlain,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
+    public async Task<AuthTokens> RefreshAsync(long userId, long orgId, string email, string role, string refreshTokenPlain, CancellationToken ct)
     {
         var now = _clock.UtcNow;
 
-        var oldHash = _refreshHasher.Hash(refreshTokenPlain);
-        var session = await _sessions.GetByRefreshTokenHashAsync(oldHash, ct)
+        // Validate provided refresh token by hashing and searching (we store salted hashes; cannot re-hash to match)
+        // So: store hash AND also store a token "fingerprint" hash (HMAC) - but to keep this project simple:
+        // We'll store PBKDF2 hashes and verify by scanning active tokens for the user.
+        // (Ok for MVP / small token counts; switch to deterministic HMAC for scale.)
+        //
+        // Implementation detail: repo will return active tokens, then we verify.
+        var token = await _refreshTokens.GetValidByPlainAsync(userId, refreshTokenPlain, now, ct)
             ?? throw new UnauthorizedAccessException("Invalid refresh token.");
 
-        if (session.RevokedUtc is not null)
-            throw new UnauthorizedAccessException("Refresh token revoked.");
+        // rotate: revoke old token, create new
+        var newTokens = _jwt.CreateTokens(userId, orgId, email, new[] { role }, Array.Empty<string>());
 
-        if (session.ExpiresUtc <= now)
-            throw new UnauthorizedAccessException("Refresh token expired.");
+        await _refreshTokens.RevokeAsync(token.RefreshTokenId, now, replacedByTokenHash: null, ct);
 
-        // Safety: ensure refresh token belongs to the same user
-        if (session.UserId != userId)
-            throw new UnauthorizedAccessException("Refresh token user mismatch.");
+        var newRefreshHash = _hasher.Hash(newTokens.RefreshToken);
+        await _refreshTokens.CreateAsync(userId, newRefreshHash, newTokens.RefreshTokenExpiresUtc, ct);
 
-        var roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
-        if (roleCodes.Count == 0)
-        {
-            await _roles.EnsureUserHasRoleAsync(userId, "consumer", createdBy: userId, ct);
-            roleCodes = await _roles.GetRoleCodesAsync(userId, ct);
-        }
-
-        // //update: Option 1 => JWT scopes empty
-        var (tokens, newRefreshPlain) = _jwt.CreateTokens(userId, orgId, email, roleCodes, Array.Empty<string>());
-        var newHash = _refreshHasher.Hash(newRefreshPlain);
-
-        await _sessions.RotateAsync(session.SessionId, newHash, tokens.RefreshTokenExpiresUtc, now, ct);
-
-        return (tokens, newRefreshPlain);
-    }
-
-    public async Task LogoutAsync(string refreshTokenPlain, CancellationToken ct)
-    {
-        var hash = _refreshHasher.Hash(refreshTokenPlain);
-        var session = await _sessions.GetByRefreshTokenHashAsync(hash, ct);
-        if (session is null) return;
-
-        await _sessions.RevokeAsync(session.SessionId, _clock.UtcNow, ct);
-    }
-
-    // ===========================
-    // //update: Mobile endpoints
-    // ===========================
-
-    public sealed record MobileAuthResult(AuthTokens Tokens, string RefreshTokenPlain);
-
-    public async Task<MobileAuthResult> RegisterMobileAsync(
-        RegisterRequest req,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
-    {
-        var (_, _, tokens, refreshPlain) = await RegisterAsync(req, userAgent, ip, ct);
-        return new MobileAuthResult(tokens, refreshPlain);
-    }
-
-    public async Task<MobileAuthResult> LoginMobileAsync(
-        LoginRequest req,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
-    {
-        var (tokens, refreshPlain) = await LoginAsync(req, userAgent, ip, ct);
-        return new MobileAuthResult(tokens, refreshPlain);
-    }
-
-    // Cookie-less refresh for mobile: identify user from session, not Bearer claims
-    public async Task<MobileAuthResult> RefreshMobileAsync(
-        string refreshTokenPlain,
-        string? userAgent,
-        string? ip,
-        CancellationToken ct)
-    {
-        var now = _clock.UtcNow;
-
-        var oldHash = _refreshHasher.Hash(refreshTokenPlain);
-        var session = await _sessions.GetByRefreshTokenHashAsync(oldHash, ct)
-            ?? throw new UnauthorizedAccessException("Invalid refresh token.");
-
-        if (session.RevokedUtc is not null)
-            throw new UnauthorizedAccessException("Refresh token revoked.");
-
-        if (session.ExpiresUtc <= now)
-            throw new UnauthorizedAccessException("Refresh token expired.");
-
-        var user = await _users.GetByIdAsync(session.UserId, ct)
-            ?? throw new UnauthorizedAccessException("User not found.");
-
-        if (!user.IsActive)
-            throw new UnauthorizedAccessException("User inactive.");
-
-        var orgList = await _userOrgs.GetForUserAsync(user.UserId, ct);
-        var orgId = orgList.FirstOrDefault()?.OrgId
-            ?? throw new UnauthorizedAccessException("No organization assigned.");
-
-        var roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
-        if (roleCodes.Count == 0)
-        {
-            await _roles.EnsureUserHasRoleAsync(user.UserId, "consumer", createdBy: user.UserId, ct);
-            roleCodes = await _roles.GetRoleCodesAsync(user.UserId, ct);
-        }
-
-        // //update: Option 1 => JWT scopes empty
-        var (tokens, newRefreshPlain) = _jwt.CreateTokens(
-            user.UserId, orgId, user.Email, roleCodes, Array.Empty<string>());
-
-        var newHash = _refreshHasher.Hash(newRefreshPlain);
-        await _sessions.RotateAsync(session.SessionId, newHash, tokens.RefreshTokenExpiresUtc, now, ct);
-
-        return new MobileAuthResult(tokens, newRefreshPlain);
+        return newTokens;
     }
 }

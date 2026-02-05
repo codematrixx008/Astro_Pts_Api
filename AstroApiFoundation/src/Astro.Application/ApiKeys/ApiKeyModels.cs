@@ -2,9 +2,7 @@ namespace Astro.Application.ApiKeys;
 
 public sealed record CreateApiKeyRequest(
     string Name,
-    IReadOnlyList<string> Scopes,
-    int? DailyQuota,
-    string? PlanCode
+    IReadOnlyList<string> Scopes
 );
 
 public sealed record CreatedApiKey(
@@ -13,8 +11,6 @@ public sealed record CreatedApiKey(
     string Prefix,
     string Secret, // shown once
     IReadOnlyList<string> Scopes,
-    int? DailyQuota,
-    string? PlanCode,
     DateTime CreatedUtc
 );
 
@@ -26,7 +22,5 @@ public sealed record ApiKeyListItem(
     bool IsActive,
     DateTime CreatedUtc,
     DateTime? LastUsedUtc,
-    DateTime? RevokedUtc,
-    int? DailyQuota,
-    string? PlanCode
+    DateTime? RevokedUtc
 );
