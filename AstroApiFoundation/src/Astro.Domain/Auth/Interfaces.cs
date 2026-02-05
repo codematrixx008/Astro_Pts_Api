@@ -5,6 +5,16 @@ public interface IUserRepository
     Task<User?> GetByEmailAsync(string email, CancellationToken ct);
     Task<User?> GetByIdAsync(long userId, CancellationToken ct);
     Task<long> CreateAsync(string email, string passwordHash, CancellationToken ct);
+
+    // Used for external providers (Google/Facebook) where no local password exists.
+    // Convention: store empty PasswordHash.
+    Task<long> CreateExternalAsync(string email, CancellationToken ct);
+}
+
+public interface IExternalIdentityRepository
+{
+    Task<ExternalIdentity?> GetAsync(string provider, string providerUserId, CancellationToken ct);
+    Task<long> CreateAsync(long userId, string provider, string providerUserId, string emailSnapshot, CancellationToken ct);
 }
 
 public interface IOrganizationRepository

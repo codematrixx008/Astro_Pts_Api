@@ -31,6 +31,16 @@ public sealed record RefreshToken(
     string? ReplacedByTokenHash
 );
 
+// External login mapping (e.g. Google 'sub' -> local UserId)
+public sealed record ExternalIdentity(
+    long ExternalIdentityId,
+    long UserId,
+    string Provider,
+    string ProviderUserId,
+    string EmailSnapshot,
+    DateTime CreatedUtc
+);
+
 public sealed record ApiKey(
     long ApiKeyId,
     long OrgId,

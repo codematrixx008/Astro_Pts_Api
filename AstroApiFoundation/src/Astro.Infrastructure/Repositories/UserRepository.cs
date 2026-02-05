@@ -36,4 +36,21 @@ public sealed class UserRepository : IUserRepository
                     SELECT CAST(SCOPE_IDENTITY() as bigint);";
         return await conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, new { Email = email, PasswordHash = passwordHash, CreatedUtc = DateTime.UtcNow }, cancellationToken: ct));
     }
+
+    public async Task<long> CreateExternalAsync(string email, CancellationToken ct)
+    {
+        // External users (Google/Facebook) do not have a local password.
+        // Convention: store an empty PasswordHash and gate password-login accordingly.
+        await using var conn = _db.Create();
+        var sql = @"INSERT INTO Users(Email, PasswordHash, CreatedUtc, IsActive)
+                    VALUES(@Email, @PasswordHash, @CreatedUtc, 1);
+                    SELECT CAST(SCOPE_IDENTITY() as bigint);";
+
+        return await conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, new
+        {
+            Email = email,
+            PasswordHash = "",
+            CreatedUtc = DateTime.UtcNow
+        }, cancellationToken: ct));
+    }
 }
