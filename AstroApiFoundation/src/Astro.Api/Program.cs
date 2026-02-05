@@ -23,6 +23,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
+using Astro.Domain.Consumers;
 
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 var builder = WebApplication.CreateBuilder(args);
@@ -59,6 +60,15 @@ builder.Services.AddCors(options =>
     options.AddPolicy(MyAllowSpecificOrigins, policy =>
     {
         policy
+            // Explicit origins (SignalR friendly)
+            .WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "https://localhost:51790",
+                "http://103.119.198.238"
+            )
+
+            // Allow LAN + dynamic
             .SetIsOriginAllowed(origin =>
             {
                 if (string.IsNullOrWhiteSpace(origin))
@@ -69,19 +79,21 @@ builder.Services.AddCors(options =>
                     var uri = new Uri(origin);
 
                     return uri.Host.StartsWith("192.168.")
-                           || uri.Host == "localhost"
-                           || uri.Host == "103.119.198.238";
+                        || uri.Host == "localhost"
+                        || uri.Host == "103.119.198.238";
                 }
                 catch
                 {
                     return false;
                 }
             })
+
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
     });
 });
+
 
 // =====================================================
 // Repositories (Dapper)
@@ -117,6 +129,9 @@ builder.Services.AddScoped<IChatMessageRepository, ChatMessageRepository>();
 // Billing / Ledger
 builder.Services.AddScoped<ILedgerRepository, LedgerRepository>();
 builder.Services.AddScoped<IPayoutRepository, PayoutRepository>();
+
+//Cosumer
+builder.Services.AddScoped<IConsumerProfileRepository, ConsumerProfileRepository>();
 
 // =====================================================
 // Application Services

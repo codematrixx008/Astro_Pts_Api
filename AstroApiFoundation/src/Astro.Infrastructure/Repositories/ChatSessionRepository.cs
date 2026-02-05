@@ -80,38 +80,64 @@ SELECT CASE WHEN EXISTS(
 
     public async Task<bool> TryAcceptAsync(long chatSessionId, long astrologerId, DateTime acceptedUtc, CancellationToken ct)
     {
-        const string sql = @"
-UPDATE dbo.ChatSessions
-SET Status = 'accepted', AcceptedUtc = @AcceptedUtc
-WHERE ChatSessionId = @ChatSessionId
-  AND AstrologerId = @AstrologerId
-  AND Status = 'requested';";
-        using var conn = _db.Create();
-        var rows = await conn.ExecuteAsync(new CommandDefinition(sql, new
+        try
         {
-            ChatSessionId = chatSessionId,
-            AstrologerId = astrologerId,
-            AcceptedUtc = acceptedUtc
-        }, cancellationToken: ct));
-        return rows == 1;
+            const string sql = @"
+            UPDATE dbo.ChatSessions
+            SET Status = 'accepted', 
+                AcceptedUtc = @AcceptedUtc
+            WHERE ChatSessionId = @ChatSessionId
+              AND AstrologerId = @AstrologerId
+              AND Status = 'requested';";
+
+            using var conn = _db.Create();
+
+            // Ensure we are passing the date as UTC explicitly
+            var parameters = new
+            {
+                ChatSessionId = chatSessionId,
+                AstrologerId = astrologerId,
+                AcceptedUtc = acceptedUtc.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(acceptedUtc, DateTimeKind.Utc)
+                    : acceptedUtc.ToUniversalTime()
+            };
+
+            var rows = await conn.ExecuteAsync(new CommandDefinition(sql, parameters, cancellationToken: ct));
+
+            return rows == 1;
+        }
+        catch (Exception ex)
+        {
+            
+            Console.WriteLine(ex.ToString());
+            return false; 
+        }
     }
 
     public async Task<bool> TryStartAsync(long chatSessionId, long userId, DateTime startedUtc, CancellationToken ct)
     {
-        const string sql = @"
+        try
+        {
+            const string sql = @"
 UPDATE dbo.ChatSessions
 SET Status = 'active', StartedUtc = @StartedUtc
 WHERE ChatSessionId = @ChatSessionId
   AND Status = 'accepted'
   AND (ConsumerId = @UserId OR AstrologerId = @UserId);";
-        using var conn = _db.Create();
-        var rows = await conn.ExecuteAsync(new CommandDefinition(sql, new
+            using var conn = _db.Create();
+            var rows = await conn.ExecuteAsync(new CommandDefinition(sql, new
+            {
+                ChatSessionId = chatSessionId,
+                UserId = userId,
+                StartedUtc = startedUtc
+            }, cancellationToken: ct));
+            return rows == 1;
+        }
+        catch(Exception ex)
         {
-            ChatSessionId = chatSessionId,
-            UserId = userId,
-            StartedUtc = startedUtc
-        }, cancellationToken: ct));
-        return rows == 1;
+            Console.WriteLine(ex.ToString());
+            return false;
+        }
     }
 
     public async Task<bool> TryEndAsync(long chatSessionId, long userId, DateTime endedUtc, CancellationToken ct)
@@ -154,14 +180,14 @@ WHERE ChatSessionId = @ChatSessionId
     {
         // overlap rule: start < existingEnd AND end > existingStart
         const string sql = @"
-SELECT CASE WHEN EXISTS(
-    SELECT 1
-    FROM dbo.ChatSessions
-    WHERE AstrologerId = @AstrologerId
-      AND Status IN ('requested','accepted','active')
-      AND @StartUtc < ScheduledEndUtc
-      AND @EndUtc > ScheduledStartUtc
-) THEN 1 ELSE 0 END;";
+        SELECT CASE WHEN EXISTS(
+            SELECT 1
+            FROM dbo.ChatSessions
+            WHERE AstrologerId = @AstrologerId
+              AND Status IN ('requested','accepted','active')
+              AND @StartUtc < ScheduledEndUtc
+              AND @EndUtc > ScheduledStartUtc
+        ) THEN 1 ELSE 0 END;";
         using var conn = _db.Create();
         var ok = await conn.ExecuteScalarAsync<int>(
             new CommandDefinition(sql, new
