@@ -1,4 +1,4 @@
-using Astro.Application.Auth;
+﻿using Astro.Application.Auth;
 using Astro.Application.ApiKeys;
 using Astro.Application.Billing;
 using Astro.Application.Common;
@@ -24,9 +24,14 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Astro.Domain.Consumers;
+using Astro.Domain.Profile;
 
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = "wwwroot"
+});
 
 // =====================================================
 // Configuration
@@ -132,6 +137,10 @@ builder.Services.AddScoped<IPayoutRepository, PayoutRepository>();
 
 //Cosumer
 builder.Services.AddScoped<IConsumerProfileRepository, ConsumerProfileRepository>();
+
+//ProfileImage
+builder.Services.AddScoped<IProfileRepository, ProfileRepository>();
+
 
 // =====================================================
 // Application Services
@@ -279,6 +288,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+app.UseStaticFiles();
 
 // Initialize DB
 using (var scope = app.Services.CreateScope())
@@ -301,6 +311,7 @@ app.UseCookiePolicy(new CookiePolicyOptions
 app.UseHttpsRedirection();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
 
 // Rate limiter early
 app.UseRateLimiter();
