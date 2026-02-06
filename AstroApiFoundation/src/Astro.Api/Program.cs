@@ -33,6 +33,7 @@ var builder = WebApplication.CreateBuilder(args);
 // =====================================================
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<AuthCookieOptions>(builder.Configuration.GetSection("AuthCookies"));
+builder.Services.Configure<GoogleOAuthOptions>(builder.Configuration.GetSection("GoogleOAuth"));
 
 var dbOpts = new DbOptions();
 builder.Configuration.GetSection("Db").Bind(dbOpts);
@@ -54,25 +55,20 @@ builder.Services.AddSingleton(sp =>
 // CORS for React UI (cookie auth needs AllowCredentials)
 //var uiOrigin = builder.Configuration["Cors:UiOrigin"] ?? "http://localhost:3000";
 
-//builder.Services.AddCors(options =>
-//{
-//    options.AddPolicy("ui", policy =>
-//    {
-//        policy.WithOrigins(
-//              "http://localhost:5173",
-//              "http://localhost:3000"
-//        )
-//              .AllowAnyHeader()
-//              .AllowAnyMethod()
-//              .AllowCredentials();
-//    });
-//});
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(MyAllowSpecificOrigins, policy =>
     {
         policy
+            // Explicit origins (SignalR friendly)
+            .WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "https://localhost:51790",
+                "http://103.119.198.238"
+            )
+
+            // Allow LAN + dynamic
             .SetIsOriginAllowed(origin =>
             {
                 if (string.IsNullOrWhiteSpace(origin))
@@ -83,26 +79,32 @@ builder.Services.AddCors(options =>
                     var uri = new Uri(origin);
 
                     return uri.Host.StartsWith("192.168.")
-                           || uri.Host == "localhost"
-                           || uri.Host == "103.119.198.238";
+                        || uri.Host == "localhost"
+                        || uri.Host == "103.119.198.238";
                 }
                 catch
                 {
                     return false;
                 }
             })
+
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
     });
 });
 
+
 // =====================================================
 // Repositories (Dapper)
 // =====================================================
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IExternalIdentityRepository, ExternalIdentityRepository>();
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
 builder.Services.AddScoped<IUserOrganizationRepository, UserOrganizationRepository>();
+
+// External identities (Google/Facebook)
+builder.Services.AddScoped<IExternalIdentityRepository, ExternalIdentityRepository>();
 
 // Multi-role + sessions
 builder.Services.AddScoped<IUserRoleRepository, UserRoleRepository>();
@@ -136,6 +138,11 @@ builder.Services.AddScoped<IConsumerProfileRepository, ConsumerProfileRepository
 // =====================================================
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<AuthService>();
+
+// Google OAuth (Auth Code + PKCE)
+builder.Services.AddHttpClient<GoogleOAuthClient>();
+builder.Services.AddSingleton<GoogleIdTokenValidator>();
+
 builder.Services.AddScoped<ApiKeyService>();
 builder.Services.AddScoped<BillingService>();
 
@@ -184,6 +191,15 @@ builder.Services
             }
         };
     });
+
+//builder.Services.AddAuthorization(options =>
+//{
+//    options.AddPolicy(ScopePolicies.EphemerisRead, p =>
+//        p.Requirements.Add(new ScopeRequirement("ephemeris.read")));
+//});
+
+//builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ScopeAuthorizationHandler>();
+
 
 builder.Services.AddAuthorization(options =>
 {
@@ -249,6 +265,14 @@ builder.Services.AddSwaggerGen(c =>
         In = ParameterLocation.Header,
         Description = "API key header. Format: <prefix>.<secret>"
     });
+
+    /*c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+            Array.Empty<string>()
+        }
+    });*/
 
     c.OperationFilter<Astro.Api.Swagger.SecurityRequirementsOperationFilter>();
 

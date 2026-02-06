@@ -36,7 +36,7 @@ public sealed class ConsumerProfileController : ControllerBase
         string? City,
         string? PreferredLanguage);
 
-    [HttpPut("me")]
+    [HttpPost("me")]
     public async Task<IActionResult> UpsertMe([FromBody] UpdateConsumerProfileRequest req, CancellationToken ct)
     {
         var userId = User.RequireUserId();

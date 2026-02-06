@@ -95,6 +95,10 @@ public sealed class AuthService
 
         if (!user.IsActive) throw new UnauthorizedAccessException("User inactive.");
 
+        // If the user was created via an external provider (Google, etc.), no local password exists.
+        if (string.IsNullOrWhiteSpace(user.PasswordHash))
+            throw new UnauthorizedAccessException("Use Google login for this account.");
+
         if (!_passwordHasher.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid credentials.");
 

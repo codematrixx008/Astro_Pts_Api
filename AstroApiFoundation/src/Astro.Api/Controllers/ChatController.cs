@@ -132,7 +132,7 @@ public sealed class ChatController : ControllerBase
 
         // Extra safety: re-check overlap at accept time
         var hasOverlap = await _sessions.HasAstrologerOverlapAsync(astrologerId, session.ScheduledStartUtc, session.ScheduledEndUtc, ct);
-        if (hasOverlap) return Conflict(new { error = "slot_already_booked" });
+        if (!hasOverlap) return Conflict(new { error = "slot_already_booked" });
 
         var ok = await _sessions.TryAcceptAsync(id, astrologerId, DateTime.UtcNow, ct);
         if (!ok) return Conflict(new { error = "cannot_accept" });

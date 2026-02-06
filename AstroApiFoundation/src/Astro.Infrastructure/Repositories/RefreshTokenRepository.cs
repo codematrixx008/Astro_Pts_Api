@@ -34,13 +34,13 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
     public async Task<RefreshToken?> GetValidByPlainAsync(long userId, string refreshTokenPlain, DateTime nowUtc, CancellationToken ct)
     {
         using var conn = _db.Create();
-        var sql = @"SELECT TOP 1 RefreshTokenId, UserId, TokenHash, ExpiresUtc, CreatedUtc, RevokedUtc, ReplacedByTokenHash
+        // MSSQL uses TOP; LIMIT is not supported.
+        var sql = @"SELECT TOP (25) RefreshTokenId, UserId, TokenHash, ExpiresUtc, CreatedUtc, RevokedUtc, ReplacedByTokenHash
                     FROM RefreshTokens
                     WHERE UserId = @UserId
                       AND RevokedUtc IS NULL
                       AND ExpiresUtc > @NowUtc
-                    ORDER BY RefreshTokenId DESC
-                    LIMIT 25;";
+                    ORDER BY RefreshTokenId DESC;";
 
         var candidates = await conn.QueryAsync<RefreshToken>(new CommandDefinition(sql, new { UserId = userId, NowUtc = nowUtc }, cancellationToken: ct));
         foreach (var t in candidates)

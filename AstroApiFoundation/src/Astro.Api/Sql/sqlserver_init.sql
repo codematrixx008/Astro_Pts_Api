@@ -14,6 +14,24 @@ BEGIN
     );
 END;
 
+-- External login mapping (Google/Facebook)
+IF OBJECT_ID(N'dbo.ExternalIdentities', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ExternalIdentities (
+        ExternalIdentityId BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        UserId             BIGINT NOT NULL,
+        Provider           NVARCHAR(50) NOT NULL,
+        ProviderUserId     NVARCHAR(200) NOT NULL,
+        EmailSnapshot      NVARCHAR(320) NOT NULL,
+        CreatedUtc         DATETIME2(0) NOT NULL,
+
+        CONSTRAINT UQ_ExternalIdentities_Provider_Sub UNIQUE (Provider, ProviderUserId),
+        CONSTRAINT FK_ExternalIdentities_Users FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId)
+    );
+
+    CREATE INDEX IX_ExternalIdentities_EmailSnapshot ON dbo.ExternalIdentities(EmailSnapshot);
+END;
+
 IF OBJECT_ID(N'dbo.Organizations', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.Organizations (
